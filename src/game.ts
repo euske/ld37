@@ -11,28 +11,43 @@
 
 //  Initialize the resources.
 let FONT: Font;
-let SPRITES:ImageSpriteSheet;
-let BACKGROUNDS:ImageSpriteSheet;
+let SPRITES:SpriteSheet;
+let BACKGROUNDS:SpriteSheet;
 let TILES:SpriteSheet;
 let BULLET = new RectImageSource('white', new Rect(-3,-2,6,4));
 addInitHook(() => {
     FONT = new Font(IMAGES['font'], 'white');
-    SPRITES = new ImageSpriteSheet(
-	IMAGES['sprites'], new Vec2(16,16), new Vec2(8,8));
     BACKGROUNDS = new ImageSpriteSheet(
 	IMAGES['backgrounds'], new Vec2(192,192), new Vec2(0,0));
+    //SPRITES = new ImageSpriteSheet(
+    //IMAGES['sprites'], new Vec2(16,16), new Vec2(8,8));
+    SPRITES = new SimpleSpriteSheet(
+	[new RectImageSource('green', new Rect(-8,-8,16,16)), // player
+	 new RectImageSource('purple', new Rect(-8,-8,16,16)), // enemy
+	 new OvalImageSource('yellow', new Rect(-8,-8,16,16)), // yellow coin
+	 new OvalImageSource('red', new Rect(-8,-8,16,16)), // red coin
+	]);
     TILES = new SimpleSpriteSheet(
-	[new RectImageSource(null, new Rect(0,0,16,16)),
-	 new RectImageSource('red', new Rect(0,0,16,16)),
-	 null, null, null, null, null, null, null, null]
-    );
+	[new RectImageSource(null, new Rect(0,0,16,16)), // 0
+	 new RectImageSource('red', new Rect(0,0,16,16)), // 1
+	 new RectImageSource('red', new Rect(0,0,16,8)),  // 2
+	 null, null, null, null, null, null, null, null
+	]);
 });
 
-enum Tile {
+enum S {
+    PLAYER = 0,
+    ENEMY = 1,
+    COIN0 = 2,
+    COIN1 = 3,
+};
+enum T {
     NONE = 0,
-    OBSTACLE = 1,
+    BLOCK = 1,
+    FLOOR = 2,
     PLAYER = 9,
 };
+
 
 function drawArrow(ctx: CanvasRenderingContext2D, y: number) {
     let t = y*0.8;
@@ -57,7 +72,7 @@ class Bullet extends Projectile {
 
     constructor(elevator: Elevator, pos: Vec2, vx: number) {
 	super(pos);
-	this.movement = new Vec2(0, vx*8);
+	this.movement = new Vec2(vx*8, 0);
 	this.tilemap = elevator.tilemap;
 	this.frame = this.tilemap.bounds;
 	this.sprite.imgsrc = BULLET;
@@ -67,7 +82,8 @@ class Bullet extends Projectile {
     update() {
 	super.update();
 	let range = this.getCollider().getAABB();
-	if (this.tilemap.findTileByCoord(this.tilemap.isObstacle, range)) {
+	if (this.tilemap.findTileByCoord(
+	    (c:number) => { return c != T.NONE; }, range)) {
 	    this.stop();
 	}
     }
@@ -80,6 +96,7 @@ class Passenger extends PhysicalEntity {
 
     elevator: Elevator;
     tilemap: TileMap;
+    downjump = false;
 
     constructor(elevator: Elevator, pos: Vec2) {
 	super(pos);
@@ -95,7 +112,57 @@ class Passenger extends PhysicalEntity {
     }
 
     getObstaclesFor(range: Rect, v: Vec2, context: string): Rect[] {
-	return this.tilemap.getTileRects(this.tilemap.isObstacle, range);
+	let ts = this.tilemap.tilesize;
+	let rects = [] as Rect[];
+	this.tilemap.apply((x:number, y:number, c:number) => {
+	    switch (c) {
+	    case T.FLOOR:
+		if (!this.downjump || v.y < 0) {
+		    rects.push(new Rect(x*ts, y*ts, ts, 8));
+		}
+		break;
+	    case T.BLOCK:
+		rects.push(new Rect(x*ts, y*ts, ts, ts));
+		break;
+	    }
+	    return false;
+	},
+			   this.tilemap.coord2map(range));
+	return rects;
+    }
+}
+
+
+//  Coin
+//
+class Coin extends Passenger {
+
+    movement: Vec2;
+    direction: number;
+
+    constructor(elevator: Elevator, pos: Vec2, direction=0) {
+	super(elevator, pos);
+	this.lifetime = 3;
+	this.sprite.imgsrc = SPRITES.get((0 < direction)? S.COIN0 : S.COIN1);
+	this.collider = this.sprite.getBounds(new Vec2());
+	this.movement = new Vec2(rnd(2)*2-1, 0).scale(2);
+	this.direction = direction;
+    }
+
+    update() {
+	super.update();
+	let v = this.moveIfPossible(this.movement);
+	if (v.isZero()) {
+	    this.movement.x = -this.movement.x;
+	}
+    }
+
+    collidedWith(e: Entity) {
+	if (e instanceof Player ||
+	    e instanceof Enemy) {
+	    this.stop();
+	    this.elevator.vote(this.direction);
+	}
     }
 }
 
@@ -109,7 +176,7 @@ class Player extends Passenger {
 
     constructor(elevator: Elevator, pos: Vec2) {
 	super(elevator, pos);
-	this.sprite.imgsrc = SPRITES.get(0);
+	this.sprite.imgsrc = SPRITES.get(S.PLAYER);
 	this.collider = this.sprite.getBounds(new Vec2());
     }
 
@@ -140,7 +207,7 @@ class Enemy extends Passenger {
 
     constructor(elevator: Elevator, pos: Vec2) {
 	super(elevator, pos);
-	this.sprite.imgsrc = SPRITES.get(1);
+	this.sprite.imgsrc = SPRITES.get(S.ENEMY);
 	this.collider = this.sprite.getBounds(new Vec2());
     }
 
@@ -179,13 +246,16 @@ class Elevator extends Layer {
 	this.tilemap = tilemap;
     }
 
+    vote(direction: number) {
+    }
+
     tick(t: number) {
 	super.tick(t);
 	let door = (this.dooropen)? 0 : 1;
 	if (door != this._curdoor) {
-	    if (0.1 < Math.abs(door - this._curdoor)) {
+	    if (0.05 < Math.abs(door - this._curdoor)) {
 		// door opening/closing.
-		this._curdoor = (this._curdoor + door)/2;
+		this._curdoor = (this._curdoor*0.4 + door*0.6);
 	    } else {
 		// door open/close completed.
 		this._curdoor = door;
@@ -193,8 +263,8 @@ class Elevator extends Layer {
 		if (this.dooropen) {
 		    this.gravity = 1;
 		} else {
-		    this.gravity = rnd(5)-2;
-		    this.accel = this.gravity;
+		    this.gravity = choice([-2, -1, +1, +2]);
+		    this.accel = -this.gravity*2;
 		}
 	    }
 	} else if (this.dooropen) {
@@ -213,7 +283,9 @@ class Elevator extends Layer {
 		this.updateFloor();
 	    } else {
 		// moving...
-		this.floor -= this.gravity;
+		// 0 < gravity: elevator is up, floor is up.
+		// 0 > gravity: elevator is down, floor is down.
+		this.floor += this.gravity*0.2;
 	    }
 	}
 	// update the basepos.
@@ -227,6 +299,13 @@ class Elevator extends Layer {
 	let p = new Vec2(rnd(this.tilemap.width), 0);
 	let enemy = new Enemy(this, this.tilemap.map2coord(p).center());
 	this.addTask(enemy);
+	// add coins.
+	p = new Vec2(rnd(this.tilemap.width), 0);
+	let coin1 = new Coin(this, this.tilemap.map2coord(p).center(), -1);
+	this.addTask(coin1);
+	p = new Vec2(rnd(this.tilemap.width), 0);
+	let coin2 = new Coin(this, this.tilemap.map2coord(p).center(), +1);
+	this.addTask(coin2);
     }
 
     getFloor() {
@@ -274,22 +353,21 @@ class Game extends GameScene {
 	super.init();
 	const MAP = [ // 12x12
 	    '000000000000',
-	    '001100110011',
+	    '002200220022',
 	    '000000000000',
-	    '110011001100',
+	    '220022002200',
 	    '000000000000',
-	    '001100110011',
+	    '002200220022',
 	    '000000000000',
-	    '110011901100',
+	    '220022902200',
 	    '000000000000',
-	    '011001100110',
+	    '022002200220',
 	    '000000000000',
 	    '111111111111',
 	];
 	let tilemap = new TileMap(16, MAP.map((x:string) => { return str2array(x) }));
-	tilemap.isObstacle = ((c:number) => { return (c == Tile.OBSTACLE); });
 	this.elevator = new Elevator(tilemap);
-	let p = tilemap.findTile((c:number) => { return (c == Tile.PLAYER); });
+	let p = tilemap.findTile((c:number) => { return (c == T.PLAYER); });
 	this.player = new Player(this.elevator, tilemap.map2coord(p).center());
 	tilemap.set(p.x, p.y, 0);
 	this.elevator.addTask(this.player);
@@ -311,8 +389,13 @@ class Game extends GameScene {
 	this.player.setMove(v);
 	if (v.y < 0) {
 	    this.player.setJump(+Infinity);
+	    this.player.downjump = false;
 	} else if (0 < v.y) {
 	    this.player.setJump(0);
+	    this.player.downjump = true;
+	} else {
+	    this.player.setJump(0);
+	    this.player.downjump = false;
 	}
     }
 
