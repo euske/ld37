@@ -24,6 +24,8 @@ addInitHook(() => {
     SPRITES = new SimpleSpriteSheet(
 	[new RectImageSource('green', new Rect(-8,-8,16,16)), // player
 	 new RectImageSource('purple', new Rect(-8,-8,16,16)), // enemy
+	 new RectImageSource('pink', new Rect(-8,-8,16,16)), // guest
+	 new RectImageSource('gray', new Rect(-4,-4,8,8)), // puff
 	 new OvalImageSource('yellow', new Rect(-8,-8,16,16)), // yellow coin
 	 new OvalImageSource('red', new Rect(-8,-8,16,16)), // red coin
 	]);
@@ -38,8 +40,10 @@ addInitHook(() => {
 enum S {
     PLAYER = 0,
     ENEMY = 1,
-    COIN0 = 2,
-    COIN1 = 3,
+    GUEST = 2,
+    PUFF = 3,
+    COIN0 = 4,
+    COIN1 = 5,
 };
 enum T {
     NONE = 0,
@@ -48,6 +52,15 @@ enum T {
     PLAYER = 9,
 };
 
+function floorName(f: number) {
+    if (f == 0) {
+	return 'LOBBY';
+    } else if (f < 0) {
+	return "B"+Math.abs(f);
+    } else {
+	return "F"+f;
+    }
+}
 
 function drawArrow(ctx: CanvasRenderingContext2D, y: number) {
     let t = y*0.8;
@@ -87,6 +100,19 @@ class Bullet extends Projectile {
 	    this.stop();
 	}
     }
+}
+
+
+//  Puff
+//
+class Puff extends Entity {
+
+    constructor(pos: Vec2) {
+	super(pos);
+	this.lifetime = 0.2;
+	this.sprite.imgsrc = SPRITES.get(S.PUFF);
+    }
+
 }
 
 
@@ -142,7 +168,6 @@ class Coin extends Passenger {
 
     constructor(elevator: Elevator, pos: Vec2, direction=0) {
 	super(elevator, pos);
-	this.lifetime = 3;
 	this.sprite.imgsrc = SPRITES.get((0 < direction)? S.COIN0 : S.COIN1);
 	this.collider = this.sprite.getBounds(new Vec2());
 	this.movement = new Vec2(rnd(2)*2-1, 0).scale(2);
@@ -154,6 +179,10 @@ class Coin extends Passenger {
 	let v = this.moveIfPossible(this.movement);
 	if (v.isZero()) {
 	    this.movement.x = -this.movement.x;
+	}
+	if (3 <= this.getTime()) {
+	    this.stop();
+	    this.elevator.addPuff(this.pos);
 	}
     }
 
@@ -222,6 +251,39 @@ class Enemy extends Passenger {
 	}
 	this.moveIfPossible(this.movement);
     }
+
+    collidedWith(e: Entity) {
+	if (e instanceof Bullet) {
+	    this.stop();
+	    this.elevator.addPuff(this.pos);
+	}
+    }
+}
+
+
+//  Guest
+//
+class Guest extends Passenger {
+
+    movement = new Vec2();
+
+    constructor(elevator: Elevator, pos: Vec2) {
+	super(elevator, pos);
+	this.sprite.imgsrc = SPRITES.get(S.GUEST);
+	this.collider = this.sprite.getBounds(new Vec2());
+    }
+
+    update() {
+	super.update();
+	if (rnd(10) == 0) {
+	    let vx = rnd(3)-1;
+	    this.movement.x = vx*2;
+	    if (vx == 0) {
+		this.setJump(0);
+	    }
+	}
+	this.moveIfPossible(this.movement);
+    }
 }
 
 
@@ -229,6 +291,7 @@ class Enemy extends Passenger {
 //
 class Elevator extends Layer {
 
+    game: Game;
     tilemap: TileMap;
     dooropen = false;
     background: ImageSource = null;
@@ -237,12 +300,14 @@ class Elevator extends Layer {
     floor = 1;
     basepos = 0;
     accel = 0;
+    guest: Guest = null;
 
     private _lastopen = 0;
     private _curdoor = 1;
     
-    constructor(tilemap: TileMap) {
+    constructor(game: Game, tilemap: TileMap) {
 	super();
+	this.game = game;
 	this.tilemap = tilemap;
     }
 
@@ -280,7 +345,7 @@ class Elevator extends Layer {
 		// open door.
 		this._lastopen = t;
 		this.dooropen = true;
-		this.updateFloor();
+		this.openFloor();
 	    } else {
 		// moving...
 		// 0 < gravity: elevator is up, floor is up.
@@ -293,7 +358,7 @@ class Elevator extends Layer {
 	this.accel = (this.accel - this.basepos*0.4)*0.8;
     }
 
-    updateFloor() {
+    openFloor() {
 	this.background = BACKGROUNDS.get(rnd(4));
 	// add enemies.
 	let p = new Vec2(rnd(this.tilemap.width), 0);
@@ -306,11 +371,23 @@ class Elevator extends Layer {
 	p = new Vec2(rnd(this.tilemap.width), 0);
 	let coin2 = new Coin(this, this.tilemap.map2coord(p).center(), +1);
 	this.addTask(coin2);
+	// add the guest.
+	if (this.guest === null) {
+	    this.guest = new Guest(this, new Vec2(this.tilemap.bounds.width/2, 8));
+	    this.guest.stopped.subscribe(() => {
+		this.guest = null;
+	    });
+	    this.addTask(this.guest);
+	    this.game.addBalloon('HEY!', this.guest.pos);
+	}
     }
 
     getFloor() {
-	let f = int(this.floor);
-	return (f <= 0)? "BF"+Math.abs(f) : "F"+f;
+	return floorName(int(this.floor));
+    }
+
+    addPuff(pos: Vec2) {
+	this.addTask(new Puff(pos));
     }
     
     render(ctx: CanvasRenderingContext2D, bx: number, by: number) {
@@ -344,13 +421,16 @@ class Elevator extends Layer {
 // 
 class Game extends GameScene {
 
+    eframe: Rect;
     elevator: Elevator;
     tilemap: TileMap;
     player: Player;
+    balloon: DialogBox;
     statusBox: TextBox;
     
     init() {
 	super.init();
+	// prepare the map.
 	const MAP = [ // 12x12
 	    '000000000000',
 	    '002200220022',
@@ -366,12 +446,25 @@ class Game extends GameScene {
 	    '111111111111',
 	];
 	let tilemap = new TileMap(16, MAP.map((x:string) => { return str2array(x) }));
-	this.elevator = new Elevator(tilemap);
+	// create the elevator.
+	this.eframe = this.screen.resize(tilemap.bounds.width, tilemap.bounds.height);
+	this.elevator = new Elevator(this, tilemap);
+	// place a player.
 	let p = tilemap.findTile((c:number) => { return (c == T.PLAYER); });
 	this.player = new Player(this.elevator, tilemap.map2coord(p).center());
 	tilemap.set(p.x, p.y, 0);
 	this.elevator.addTask(this.player);
+	// additional thingamabob.
 	this.statusBox = new TextBox(this.screen.inflate(-8,-8), FONT);
+	let textBox = new TextBox(new Rect(100,20,100,50), FONT);
+	textBox.background = 'rgba(0,0,0,0.5)';
+	textBox.borderColor = 'white';
+	textBox.borderWidth = 2;
+	textBox.padding = 4;
+	this.balloon = new DialogBox(textBox);
+	this.balloon.autoHide = true;
+	this.balloon.textbox.visible = false;
+	this.add(this.balloon);
     }
 
     tick(t: number) {
@@ -408,9 +501,7 @@ class Game extends GameScene {
     render(ctx: CanvasRenderingContext2D, bx: number, by: number) {
 	ctx.fillStyle = '#000000';
 	ctx.fillRect(bx, by, this.screen.width, this.screen.height);
-	let ex = (this.screen.width - this.elevator.tilemap.bounds.width)/2;
-	let ey = (this.screen.height - this.elevator.tilemap.bounds.height)/2;
-	this.elevator.render(ctx, bx+ex, by+ey+this.elevator.basepos);
+	this.elevator.render(ctx, bx+this.eframe.x, by+this.eframe.y+this.elevator.basepos);
 	super.render(ctx, bx, by);
 	this.statusBox.render(ctx, bx, by);
 	// gravity indicator.
@@ -420,5 +511,15 @@ class Game extends GameScene {
 	ctx.scale(4, 4);
 	drawArrow(ctx, this.elevator.gravity*4);
 	ctx.restore();
+    }
+
+    addBalloon(text: string, pos: Vec2) {
+	let frame = this.balloon.textbox.frame;
+	let x = clamp(0, pos.x - frame.width/2, this.eframe.width-frame.width);
+	let y = clamp(0, pos.y - frame.height, this.eframe.height-frame.height);
+	frame.x = this.eframe.x + x;
+	frame.y = this.eframe.y + y;
+	this.balloon.addDisplay(text, 5);
+	this.balloon.addPause(1);
     }
 }
