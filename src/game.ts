@@ -112,17 +112,20 @@ class Game extends GameScene {
 
     onDirChanged(v: Vec2) {
 	this.player.setMove(v);
+	if (v.y < 0) {
+	    this.player.setJump(+Infinity);
+	} else if (0 < v.y) {
+	    this.player.setJump(0);
+	}
     }
 
     onButtonPressed(keysym: KeySym) {
 	if (keysym == KeySym.Action) {
-	    this.player.setJump(+Infinity);
 	}
     }
 
     onButtonReleased(keysym: KeySym) {
 	if (keysym == KeySym.Action) {
-	    this.player.setJump(0);
 	}
     }
 

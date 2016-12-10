@@ -45,7 +45,7 @@ class TileMap {
 	return '<TileMap: '+this.width+','+this.height+'>';
     }
   
-    get(x: number, y: number) {
+    get(x: number, y: number): number {
 	if (0 <= x && 0 <= y && x < this.width && y < this.height) {
 	    return this.map[y][x];
 	} else {
@@ -310,7 +310,7 @@ class RangeMap {
 	this._data = data;
     }
 
-    get(x0: number, y0: number, x1: number, y1: number) {
+    get(x0: number, y0: number, x1: number, y1: number): number {
 	let t: number;
 	if (x1 < x0) {
 	    t = x0; x0 = x1; x1 = t;
@@ -328,7 +328,7 @@ class RangeMap {
 		this._data[y0][x1] + this._data[y0][x0]);
     }
 
-    exists(rect: Rect) {
+    exists(rect: Rect): boolean {
 	return (this.get(rect.x, rect.y,
 			 rect.x+rect.width,
 			 rect.y+rect.height) !== 0);
