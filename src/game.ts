@@ -12,11 +12,15 @@
 //  Initialize the resources.
 let FONT: Font;
 let SPRITES:ImageSpriteSheet;
+let BACKGROUNDS:ImageSpriteSheet;
 let TILES:SpriteSheet;
+let BULLET = new RectImageSource('white', new Rect(-3,-2,6,4));
 addInitHook(() => {
     FONT = new Font(IMAGES['font'], 'white');
     SPRITES = new ImageSpriteSheet(
 	IMAGES['sprites'], new Vec2(16,16), new Vec2(8,8));
+    BACKGROUNDS = new ImageSpriteSheet(
+	IMAGES['backgrounds'], new Vec2(192,192), new Vec2(0,0));
     TILES = new SimpleSpriteSheet(
 	[new RectImageSource(null, new Rect(0,0,16,16)),
 	 new RectImageSource('red', new Rect(0,0,16,16)),
@@ -42,6 +46,31 @@ function drawArrow(ctx: CanvasRenderingContext2D, y: number) {
     ctx.lineTo(-1, 0);
     ctx.closePath();
     ctx.fill();
+}
+
+
+//  Bullet
+//
+class Bullet extends Projectile {
+
+    tilemap: TileMap;
+
+    constructor(elevator: Elevator, pos: Vec2, vx: number) {
+	super(pos);
+	this.movement = new Vec2(0, vx*8);
+	this.tilemap = elevator.tilemap;
+	this.frame = this.tilemap.bounds;
+	this.sprite.imgsrc = BULLET;
+	this.collider = this.sprite.getBounds(new Vec2());
+    }
+
+    update() {
+	super.update();
+	let range = this.getCollider().getAABB();
+	if (this.tilemap.findTileByCoord(this.tilemap.isObstacle, range)) {
+	    this.stop();
+	}
+    }
 }
 
 
@@ -75,13 +104,13 @@ class Passenger extends PhysicalEntity {
 //
 class Player extends Passenger {
 
-    usermove: Vec2;
+    usermove = new Vec2();
+    direction = new Vec2(1,0);
 
     constructor(elevator: Elevator, pos: Vec2) {
 	super(elevator, pos);
 	this.sprite.imgsrc = SPRITES.get(0);
 	this.collider = this.sprite.getBounds(new Vec2());
-	this.usermove = new Vec2();
     }
 
     update() {
@@ -91,6 +120,14 @@ class Player extends Passenger {
     
     setMove(v: Vec2) {
 	this.usermove.x = v.x*4;
+	if (v.x != 0) {
+	    this.direction.x = v.x;
+	}
+    }
+
+    fire() {
+	let bullet = new Bullet(this.elevator, this.pos, this.direction.x);
+	this.elevator.addTask(bullet);
     }
 }
 
@@ -126,8 +163,8 @@ class Enemy extends Passenger {
 class Elevator extends Layer {
 
     tilemap: TileMap;
-    background = 'green';
     dooropen = false;
+    background: ImageSource = null;
 
     gravity = 1;
     floor = 1;
@@ -135,7 +172,7 @@ class Elevator extends Layer {
     accel = 0;
 
     private _lastopen = 0;
-    private _curdoor = 0;
+    private _curdoor = 1;
     
     constructor(tilemap: TileMap) {
 	super();
@@ -185,8 +222,7 @@ class Elevator extends Layer {
     }
 
     updateFloor() {
-	let color = Color.generate(Math.random()).multiply(0.5);
-	this.background = color.toString();
+	this.background = BACKGROUNDS.get(rnd(4));
 	// add enemies.
 	let p = new Vec2(rnd(this.tilemap.width), 0);
 	let enemy = new Enemy(this, this.tilemap.map2coord(p).center());
@@ -202,8 +238,12 @@ class Elevator extends Layer {
 	let rect = this.tilemap.bounds;
 	// background.
 	if (this._curdoor < 1.0) {
-	    ctx.fillStyle = this.background;
-	    ctx.fillRect(bx, by, rect.width, rect.height);
+	    if (this.background !== null) {
+		ctx.save();
+		ctx.translate(bx, by);
+		this.background.render(ctx);
+		ctx.restore();
+	    }
 	}
 
 	// elevator door.
@@ -217,14 +257,6 @@ class Elevator extends Layer {
 	    ctx, bx, by, TILES,
 	    (x:number,y:number,c:number)=>{ return c; });
 	super.render(ctx, bx, by);
-
-	// gravity indicator.
-	ctx.fillStyle = '#00ff00';
-	ctx.save();
-	ctx.translate(bx+20, by+60);
-	ctx.scale(4, 4);
-	drawArrow(ctx, this.gravity*4);
-	ctx.restore();
     }
 }
 
@@ -240,7 +272,7 @@ class Game extends GameScene {
     
     init() {
 	super.init();
-	const MAP = [
+	const MAP = [ // 12x12
 	    '000000000000',
 	    '001100110011',
 	    '000000000000',
@@ -259,6 +291,7 @@ class Game extends GameScene {
 	this.elevator = new Elevator(tilemap);
 	let p = tilemap.findTile((c:number) => { return (c == Tile.PLAYER); });
 	this.player = new Player(this.elevator, tilemap.map2coord(p).center());
+	tilemap.set(p.x, p.y, 0);
 	this.elevator.addTask(this.player);
 	this.statusBox = new TextBox(this.screen.inflate(-8,-8), FONT);
     }
@@ -285,11 +318,7 @@ class Game extends GameScene {
 
     onButtonPressed(keysym: KeySym) {
 	if (keysym == KeySym.Action) {
-	}
-    }
-
-    onButtonReleased(keysym: KeySym) {
-	if (keysym == KeySym.Action) {
+	    this.player.fire();
 	}
     }
 
@@ -301,5 +330,12 @@ class Game extends GameScene {
 	this.elevator.render(ctx, bx+ex, by+ey+this.elevator.basepos);
 	super.render(ctx, bx, by);
 	this.statusBox.render(ctx, bx, by);
+	// gravity indicator.
+	ctx.fillStyle = '#00ff00';
+	ctx.save();
+	ctx.translate(bx+20, by+60);
+	ctx.scale(4, 4);
+	drawArrow(ctx, this.elevator.gravity*4);
+	ctx.restore();
     }
 }
