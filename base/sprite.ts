@@ -48,10 +48,12 @@ class RectImageSource implements ImageSource {
     }
 
     render(ctx: CanvasRenderingContext2D) {
-	ctx.fillStyle = this.color;
-	ctx.fillRect(
-	    this.dstRect.x, this.dstRect.y,
-	    this.dstRect.width, this.dstRect.height);
+	if (this.color !== null) {
+	    ctx.fillStyle = this.color;
+	    ctx.fillRect(
+		this.dstRect.x, this.dstRect.y,
+		this.dstRect.width, this.dstRect.height);
+	}
     }
 }
 
@@ -69,14 +71,16 @@ class OvalImageSource implements ImageSource {
     }
 
     render(ctx: CanvasRenderingContext2D) {
-	ctx.save();
-	ctx.fillStyle = this.color;
-	ctx.translate(this.dstRect.centerx(), this.dstRect.centery());
-	ctx.scale(this.dstRect.width/2, this.dstRect.height/2);
-	ctx.beginPath();
-	ctx.arc(0, 0, 1, 0, Math.PI*2);
-	ctx.fill();
-	ctx.restore();
+	if (this.color !== null) {
+	    ctx.save();
+	    ctx.fillStyle = this.color;
+	    ctx.translate(this.dstRect.centerx(), this.dstRect.centery());
+	    ctx.scale(this.dstRect.width/2, this.dstRect.height/2);
+	    ctx.beginPath();
+	    ctx.arc(0, 0, 1, 0, Math.PI*2);
+	    ctx.fill();
+	    ctx.restore();
+	}
     }
 }
 
