@@ -15,6 +15,7 @@ let SPRITES:SpriteSheet;
 let BACKGROUNDS:SpriteSheet;
 let TILES:SpriteSheet;
 let BULLET = new RectImageSource('white', new Rect(-3,-2,6,4));
+
 addInitHook(() => {
     FONT = new Font(IMAGES['font'], 'white');
     BACKGROUNDS = new ImageSpriteSheet(
@@ -45,6 +46,7 @@ enum S {
     COIN0 = 4,
     COIN1 = 5,
 };
+
 enum T {
     NONE = 0,
     BLOCK = 1,
@@ -52,15 +54,34 @@ enum T {
     PLAYER = 9,
 };
 
-function floorName(f: number) {
-    if (f == 0) {
-	return 'LOBBY';
-    } else if (f < 0) {
-	return "B"+Math.abs(f);
-    } else {
-	return "F"+f;
+enum B {
+    OFFICE = 0,
+    JUNGLE = 1,
+    BEACH = 2,
+    SPACE = 3,
+};
+
+class FloorInfo {
+    y: number;
+    name: string;
+    bg: number;
+    constructor(y: number, name: string, bg=B.OFFICE) {
+	this.y = y;
+	this.name = name;
+	this.bg = bg;
     }
 }
+
+const FLOORS = [
+    new FloorInfo(-2, 'B2: JUNGLE', B.JUNGLE),
+    new FloorInfo(-1, 'B1: OFFICE', B.OFFICE),
+    new FloorInfo(0, 'LOBBY', B.OFFICE),
+    new FloorInfo(1, 'F1: OFFICE', B.OFFICE),
+    new FloorInfo(2, 'F2: BEACH', B.BEACH),
+    new FloorInfo(4, 'F4: OFFICE', B.OFFICE),
+    new FloorInfo(7, 'F7: OFFICE', B.OFFICE),
+    new FloorInfo(10, 'F2947: ORBIT', B.SPACE),
+];
 
 function drawArrow(ctx: CanvasRenderingContext2D, y: number) {
     let t = y*0.8;
@@ -75,6 +96,8 @@ function drawArrow(ctx: CanvasRenderingContext2D, y: number) {
     ctx.closePath();
     ctx.fill();
 }
+
+
 
 
 //  Bullet
@@ -266,11 +289,13 @@ class Enemy extends Passenger {
 class Guest extends Passenger {
 
     movement = new Vec2();
+    goal: FloorInfo;
 
     constructor(elevator: Elevator, pos: Vec2) {
 	super(elevator, pos);
 	this.sprite.imgsrc = SPRITES.get(S.GUEST);
 	this.collider = this.sprite.getBounds(new Vec2());
+	this.goal = choice(FLOORS);
     }
 
     update() {
@@ -284,6 +309,15 @@ class Guest extends Passenger {
 	}
 	this.moveIfPossible(this.movement);
     }
+
+    exit() {
+	// XXX move towards the door.
+	this.stop();
+    }
+
+    getLine() {
+	return ('HEY! CAN YOU GET ME TO '+this.goal.name+'?');
+    }	
 }
 
 
@@ -293,29 +327,37 @@ class Elevator extends Layer {
 
     game: Game;
     tilemap: TileMap;
-    dooropen = false;
-    background: ImageSource = null;
-
-    gravity = 1;
-    floor = 1;
     basepos = 0;
-    accel = 0;
+    shake = 0;
+
+    floor: FloorInfo = null;
+    background: ImageSource = null;
     guest: Guest = null;
 
-    private _lastopen = 0;
+    dooropen = true;
+    doornext = 10;
+    gravity = 1;
+    
     private _curdoor = 1;
     
     constructor(game: Game, tilemap: TileMap) {
 	super();
 	this.game = game;
 	this.tilemap = tilemap;
+	
+	this.floor = FLOORS[2];	// lobby
+	this.openDoor();
     }
 
     vote(direction: number) {
+	// close door.
+	this.dooropen = false;
+	this.doornext = 0;
     }
 
     tick(t: number) {
 	super.tick(t);
+	// door: 0:open, 1:closed
 	let door = (this.dooropen)? 0 : 1;
 	if (door != this._curdoor) {
 	    if (0.05 < Math.abs(door - this._curdoor)) {
@@ -325,41 +367,45 @@ class Elevator extends Layer {
 		// door open/close completed.
 		this._curdoor = door;
 		// update gravity.
-		if (this.dooropen) {
-		    this.gravity = 1;
+		if (door == 0) {
+		    this.doorOpened(t);
 		} else {
-		    this.gravity = choice([-2, -1, +1, +2]);
-		    this.accel = -this.gravity*2;
+		    this.doorClosed(t);
 		}
 	    }
+	} else if (t < this.doornext) {
+	    // waiting...
+	    // 0 < gravity: elevator is up, altitude is up.
+	    // 0 > gravity: elevator is down, altitude is down.
 	} else if (this.dooropen) {
-	    let dt = t - this._lastopen;
-	    if (Math.random() < dt*0.05) {
-		// close door.
-		this._lastopen = t;
-		this.dooropen = false;
-	    }
+	    // close door.
+	    this.dooropen = false;
 	} else {
-	    let dt = t - this._lastopen;
-	    if (Math.random() < dt*0.05) {
-		// open door.
-		this._lastopen = t;
-		this.dooropen = true;
-		this.openFloor();
-	    } else {
-		// moving...
-		// 0 < gravity: elevator is up, floor is up.
-		// 0 > gravity: elevator is down, floor is down.
-		this.floor += this.gravity*0.2;
-	    }
+	    // open door.
+	    this.openDoor();
 	}
-	// update the basepos.
-	this.basepos += this.accel;
-	this.accel = (this.accel - this.basepos*0.4)*0.8;
+
+	// update the screenshake.
+	this.basepos += this.shake;
+	this.shake = (this.shake - this.basepos*0.4)*0.8;
     }
 
-    openFloor() {
-	this.background = BACKGROUNDS.get(rnd(4));
+    openDoor() {
+	this.dooropen = true;
+	this.background = BACKGROUNDS.get(this.floor.bg);
+    }
+
+    doorClosed(t: number) {
+	this.gravity = choice([-2, -1, +1, +2]);
+	this.shake = -this.gravity*2;
+	this.doornext = t+5;
+	// choose the next floor.
+	this.floor = choice(FLOORS);
+    }
+
+    doorOpened(t: number) {
+	this.gravity = 1;
+	this.doornext = t+5;
 	// add enemies.
 	let p = new Vec2(rnd(this.tilemap.width), 0);
 	let enemy = new Enemy(this, this.tilemap.map2coord(p).center());
@@ -371,6 +417,13 @@ class Elevator extends Layer {
 	p = new Vec2(rnd(this.tilemap.width), 0);
 	let coin2 = new Coin(this, this.tilemap.map2coord(p).center(), +1);
 	this.addTask(coin2);
+	// remove the guest.
+	if (this.guest !== null) {
+	    if (this.guest.goal === this.floor) {
+		this.guest.exit();
+		this.guest = null;
+	    }
+	}
 	// add the guest.
 	if (this.guest === null) {
 	    this.guest = new Guest(this, new Vec2(this.tilemap.bounds.width/2, 8));
@@ -378,12 +431,16 @@ class Elevator extends Layer {
 		this.guest = null;
 	    });
 	    this.addTask(this.guest);
-	    this.game.addBalloon('HEY!', this.guest.pos);
+	    this.game.addBalloon(this.guest.getLine(), this.guest.pos);
 	}
     }
 
     getFloor() {
-	return floorName(int(this.floor));
+	if (this.dooropen) {
+	    return this.floor.name;
+	} else {
+	    return '???';
+	}
     }
 
     addPuff(pos: Vec2) {
@@ -391,7 +448,13 @@ class Elevator extends Layer {
     }
     
     render(ctx: CanvasRenderingContext2D, bx: number, by: number) {
+	by += this.basepos;
 	let rect = this.tilemap.bounds;
+	// frame.
+	ctx.strokeStyle = 'gray';
+	ctx.lineWidth = 4;
+	ctx.strokeRect(bx-8, by-8, rect.width+16, rect.height+16);
+
 	// background.
 	if (this._curdoor < 1.0) {
 	    if (this.background !== null) {
@@ -447,7 +510,8 @@ class Game extends GameScene {
 	];
 	let tilemap = new TileMap(16, MAP.map((x:string) => { return str2array(x) }));
 	// create the elevator.
-	this.eframe = this.screen.resize(tilemap.bounds.width, tilemap.bounds.height);
+	this.eframe = this.screen.resize(tilemap.bounds.width, tilemap.bounds.height, +1);
+	this.eframe.x += 16;
 	this.elevator = new Elevator(this, tilemap);
 	// place a player.
 	let p = tilemap.findTile((c:number) => { return (c == T.PLAYER); });
@@ -455,11 +519,12 @@ class Game extends GameScene {
 	tilemap.set(p.x, p.y, 0);
 	this.elevator.addTask(this.player);
 	// additional thingamabob.
-	this.statusBox = new TextBox(this.screen.inflate(-8,-8), FONT);
+	this.statusBox = new TextBox(this.screen.resize(100, 100, -1, +1), FONT);
 	let textBox = new TextBox(new Rect(100,20,100,50), FONT);
-	textBox.background = 'rgba(0,0,0,0.5)';
+	textBox.background = 'rgba(0,0,0,0.8)';
 	textBox.borderColor = 'white';
 	textBox.borderWidth = 2;
+	textBox.lineSpace = 2;
 	textBox.padding = 4;
 	this.balloon = new DialogBox(textBox);
 	this.balloon.autoHide = true;
@@ -470,12 +535,13 @@ class Game extends GameScene {
     tick(t: number) {
 	super.tick(t);
 	this.elevator.tick(t);
-    }
-    
-    update() {
-	super.update();
 	this.statusBox.clear();
-	this.statusBox.putText([this.elevator.getFloor()]);
+	this.statusBox.addSegment(new Vec2(4,16), this.elevator.getFloor());
+	let guest = this.elevator.guest;
+	if (guest !== null) {
+	    this.statusBox.addSegment(new Vec2(4,96), 'GOAL:');
+	    this.statusBox.addSegment(new Vec2(4,106), guest.goal.name);
+	}
     }
 
     onDirChanged(v: Vec2) {
@@ -501,13 +567,13 @@ class Game extends GameScene {
     render(ctx: CanvasRenderingContext2D, bx: number, by: number) {
 	ctx.fillStyle = '#000000';
 	ctx.fillRect(bx, by, this.screen.width, this.screen.height);
-	this.elevator.render(ctx, bx+this.eframe.x, by+this.eframe.y+this.elevator.basepos);
+	this.elevator.render(ctx, bx+this.eframe.x, by+this.eframe.y);
 	super.render(ctx, bx, by);
 	this.statusBox.render(ctx, bx, by);
 	// gravity indicator.
 	ctx.fillStyle = '#00ff00';
 	ctx.save();
-	ctx.translate(bx+20, by+60);
+	ctx.translate(bx+240, by+64);
 	ctx.scale(4, 4);
 	drawArrow(ctx, this.elevator.gravity*4);
 	ctx.restore();
@@ -519,7 +585,7 @@ class Game extends GameScene {
 	let y = clamp(0, pos.y - frame.height, this.eframe.height-frame.height);
 	frame.x = this.eframe.x + x;
 	frame.y = this.eframe.y + y;
-	this.balloon.addDisplay(text, 5);
+	this.balloon.addDisplay(text, 8);
 	this.balloon.addPause(1);
     }
 }
