@@ -23,9 +23,6 @@ addInitHook(() => {
 	 null, null, null, null, null, null, null, null]
     );
 });
-const JUMPFUNC = ((vy:number, t:number) => {
-    return (0 <= t && t <= 5)? -6 : vy+1;
-});
 
 enum Tile {
     NONE = 0,
@@ -33,21 +30,58 @@ enum Tile {
     PLAYER = 9,
 };
 
+function drawArrow(ctx: CanvasRenderingContext2D, y: number) {
+    let t = y*0.8;
+    ctx.beginPath();
+    ctx.moveTo(+1, 0);
+    ctx.lineTo(+1, t);
+    ctx.lineTo(+2, t);
+    ctx.lineTo(0, y);
+    ctx.lineTo(-2, t);
+    ctx.lineTo(-1, t);
+    ctx.lineTo(-1, 0);
+    ctx.closePath();
+    ctx.fill();
+}
+
+
+//  Passenger
+//
+class Passenger extends PhysicalEntity {
+
+    elevator: Elevator;
+    tilemap: TileMap;
+
+    constructor(elevator: Elevator, pos: Vec2) {
+	super(pos);
+	this.elevator = elevator;
+	this.tilemap = elevator.tilemap;
+	this.jumpfunc = ((vy:number, t:number) => {
+	    return (0 <= t && t <= 5)? -6 : vy+this.elevator.gravity;
+	});
+    }
+
+    getFencesFor(range: Rect, v: Vec2, context: string): Rect[] {
+	return [this.tilemap.bounds];
+    }
+
+    getObstaclesFor(range: Rect, v: Vec2, context: string): Rect[] {
+	return this.tilemap.getTileRects(this.tilemap.isObstacle, range);
+    }
+}
+
 
 //  Player
 //
-class Player extends PhysicalEntity {
+class Player extends Passenger {
 
-    game: Game;
     usermove: Vec2;
 
-    constructor(game: Game, pos: Vec2) {
-	super(pos);
-	this.game = game;
+    constructor(elevator: Elevator, pos: Vec2) {
+	super(elevator, pos);
 	this.sprite.imgsrc = SPRITES.get(0);
 	this.collider = this.sprite.getBounds(new Vec2());
 	this.usermove = new Vec2();
-	this.jumpfunc = JUMPFUNC;
     }
 
     update() {
@@ -58,14 +92,139 @@ class Player extends PhysicalEntity {
     setMove(v: Vec2) {
 	this.usermove.x = v.x*4;
     }
+}
 
-    getFencesFor(range: Rect, v: Vec2, context: string): Rect[] {
-	return [this.game.screen];
+
+//  Enemy
+//
+class Enemy extends Passenger {
+
+    movement = new Vec2();
+
+    constructor(elevator: Elevator, pos: Vec2) {
+	super(elevator, pos);
+	this.sprite.imgsrc = SPRITES.get(1);
+	this.collider = this.sprite.getBounds(new Vec2());
     }
 
-    getObstaclesFor(range: Rect, v: Vec2, context: string): Rect[] {
-	let tilemap = this.game.tilemap;
-	return tilemap.getTileRects(tilemap.isObstacle, range);
+    update() {
+	super.update();
+	if (rnd(10) == 0) {
+	    let vx = rnd(3)-1;
+	    this.movement.x = vx*2;
+	    if (vx == 0) {
+		this.setJump(0);
+	    }
+	}
+	this.moveIfPossible(this.movement);
+    }
+}
+
+
+//  Elevator
+//
+class Elevator extends Layer {
+
+    tilemap: TileMap;
+    background = 'green';
+    dooropen = false;
+
+    gravity = 1;
+    floor = 1;
+    basepos = 0;
+    accel = 0;
+
+    private _lastopen = 0;
+    private _curdoor = 0;
+    
+    constructor(tilemap: TileMap) {
+	super();
+	this.tilemap = tilemap;
+    }
+
+    tick(t: number) {
+	super.tick(t);
+	let door = (this.dooropen)? 0 : 1;
+	if (door != this._curdoor) {
+	    if (0.1 < Math.abs(door - this._curdoor)) {
+		// door opening/closing.
+		this._curdoor = (this._curdoor + door)/2;
+	    } else {
+		// door open/close completed.
+		this._curdoor = door;
+		// update gravity.
+		if (this.dooropen) {
+		    this.gravity = 1;
+		} else {
+		    this.gravity = rnd(5)-2;
+		    this.accel = this.gravity;
+		}
+	    }
+	} else if (this.dooropen) {
+	    let dt = t - this._lastopen;
+	    if (Math.random() < dt*0.05) {
+		// close door.
+		this._lastopen = t;
+		this.dooropen = false;
+	    }
+	} else {
+	    let dt = t - this._lastopen;
+	    if (Math.random() < dt*0.05) {
+		// open door.
+		this._lastopen = t;
+		this.dooropen = true;
+		this.updateFloor();
+	    } else {
+		// moving...
+		this.floor -= this.gravity;
+	    }
+	}
+	// update the basepos.
+	this.basepos += this.accel;
+	this.accel = (this.accel - this.basepos*0.4)*0.8;
+    }
+
+    updateFloor() {
+	let color = Color.generate(Math.random()).multiply(0.5);
+	this.background = color.toString();
+	// add enemies.
+	let p = new Vec2(rnd(this.tilemap.width), 0);
+	let enemy = new Enemy(this, this.tilemap.map2coord(p).center());
+	this.addTask(enemy);
+    }
+
+    getFloor() {
+	let f = int(this.floor);
+	return (f <= 0)? "BF"+Math.abs(f) : "F"+f;
+    }
+    
+    render(ctx: CanvasRenderingContext2D, bx: number, by: number) {
+	let rect = this.tilemap.bounds;
+	// background.
+	if (this._curdoor < 1.0) {
+	    ctx.fillStyle = this.background;
+	    ctx.fillRect(bx, by, rect.width, rect.height);
+	}
+
+	// elevator door.
+	let w = rect.width*this._curdoor/2;
+	ctx.fillStyle = '#889999';
+	ctx.fillRect(bx, by, w, rect.height);
+	ctx.fillRect(bx+rect.width-w, by, w, rect.height);
+
+	// tilemap and characters.
+	this.tilemap.renderFromBottomLeft(
+	    ctx, bx, by, TILES,
+	    (x:number,y:number,c:number)=>{ return c; });
+	super.render(ctx, bx, by);
+
+	// gravity indicator.
+	ctx.fillStyle = '#00ff00';
+	ctx.save();
+	ctx.translate(bx+20, by+60);
+	ctx.scale(4, 4);
+	drawArrow(ctx, this.gravity*4);
+	ctx.restore();
     }
 }
 
@@ -74,11 +233,10 @@ class Player extends PhysicalEntity {
 // 
 class Game extends GameScene {
 
-    scoreBox: TextBox;
-    score: number;
-
-    player: Player;
+    elevator: Elevator;
     tilemap: TileMap;
+    player: Player;
+    statusBox: TextBox;
     
     init() {
 	super.init();
@@ -96,18 +254,24 @@ class Game extends GameScene {
 	    '000000000000',
 	    '111111111111',
 	];
-	this.tilemap = new TileMap(16, MAP.map((x:string) => { return str2array(x) }));
-	this.tilemap.isObstacle = ((c:number) => { return (c == Tile.OBSTACLE); });
-	let p = this.tilemap.findTile((c:number) => { return (c == Tile.PLAYER); });
-	this.player = new Player(this, this.tilemap.map2coord(p).center());
-	this.add(this.player);
-	this.scoreBox = new TextBox(this.screen.inflate(-8,-8), FONT);
-	this.score = 0;
-	this.updateScore();
+	let tilemap = new TileMap(16, MAP.map((x:string) => { return str2array(x) }));
+	tilemap.isObstacle = ((c:number) => { return (c == Tile.OBSTACLE); });
+	this.elevator = new Elevator(tilemap);
+	let p = tilemap.findTile((c:number) => { return (c == Tile.PLAYER); });
+	this.player = new Player(this.elevator, tilemap.map2coord(p).center());
+	this.elevator.addTask(this.player);
+	this.statusBox = new TextBox(this.screen.inflate(-8,-8), FONT);
     }
 
+    tick(t: number) {
+	super.tick(t);
+	this.elevator.tick(t);
+    }
+    
     update() {
 	super.update();
+	this.statusBox.clear();
+	this.statusBox.putText([this.elevator.getFloor()]);
     }
 
     onDirChanged(v: Vec2) {
@@ -130,17 +294,12 @@ class Game extends GameScene {
     }
 
     render(ctx: CanvasRenderingContext2D, bx: number, by: number) {
-	ctx.fillStyle = 'rgb(0,0,128)';
+	ctx.fillStyle = '#000000';
 	ctx.fillRect(bx, by, this.screen.width, this.screen.height);
-	this.tilemap.renderFromBottomLeft(
-	    ctx, bx, by, TILES,
-	    (x:number,y:number,c:number)=>{ return c; });
+	let ex = (this.screen.width - this.elevator.tilemap.bounds.width)/2;
+	let ey = (this.screen.height - this.elevator.tilemap.bounds.height)/2;
+	this.elevator.render(ctx, bx+ex, by+ey+this.elevator.basepos);
 	super.render(ctx, bx, by);
-	this.scoreBox.render(ctx, bx, by);
-    }
-
-    updateScore() {
-	this.scoreBox.clear();
-	this.scoreBox.putText(['SCORE: '+this.score]);
+	this.statusBox.render(ctx, bx, by);
     }
 }
