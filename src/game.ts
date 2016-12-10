@@ -321,6 +321,40 @@ class Guest extends Passenger {
 }
 
 
+//  Balloon
+//
+class Balloon extends DialogBox {
+
+    eframe: Rect;
+    entity: Entity;
+
+    constructor(eframe: Rect, entity: Entity) {
+	let textBox = new TextBox(new Rect(100,20,100,50), FONT);
+	textBox.background = 'rgba(0,0,0,0.8)';
+	textBox.borderColor = 'white';
+	textBox.borderWidth = 2;
+	textBox.lineSpace = 2;
+	textBox.padding = 4;
+	textBox.visible = false;
+	super(textBox);
+	this.eframe = eframe;
+	this.entity = entity;
+	this.autoHide = true;
+    }
+
+    update() {
+	super.update();
+	let pos = this.entity.pos;
+	let frame = this.textbox.frame;
+	let x = clamp(0, pos.x - frame.width/2, this.eframe.width-frame.width);
+	let y = clamp(0, pos.y - frame.height, this.eframe.height-frame.height);
+	frame.x = this.eframe.x + x;
+	frame.y = this.eframe.y + y;
+    }
+    
+}
+
+
 //  Elevator
 //
 class Elevator extends Layer {
@@ -431,7 +465,7 @@ class Elevator extends Layer {
 		this.guest = null;
 	    });
 	    this.addTask(this.guest);
-	    this.game.addBalloon(this.guest.getLine(), this.guest.pos);
+	    this.game.addBalloon(this.guest.getLine(), this.guest);
 	}
     }
 
@@ -439,7 +473,7 @@ class Elevator extends Layer {
 	if (this.dooropen) {
 	    return this.floor.name;
 	} else {
-	    return '???';
+	    return '---';
 	}
     }
 
@@ -488,7 +522,6 @@ class Game extends GameScene {
     elevator: Elevator;
     tilemap: TileMap;
     player: Player;
-    balloon: DialogBox;
     statusBox: TextBox;
     
     init() {
@@ -520,16 +553,6 @@ class Game extends GameScene {
 	this.elevator.addTask(this.player);
 	// additional thingamabob.
 	this.statusBox = new TextBox(this.screen.resize(100, 100, -1, +1), FONT);
-	let textBox = new TextBox(new Rect(100,20,100,50), FONT);
-	textBox.background = 'rgba(0,0,0,0.8)';
-	textBox.borderColor = 'white';
-	textBox.borderWidth = 2;
-	textBox.lineSpace = 2;
-	textBox.padding = 4;
-	this.balloon = new DialogBox(textBox);
-	this.balloon.autoHide = true;
-	this.balloon.textbox.visible = false;
-	this.add(this.balloon);
     }
 
     tick(t: number) {
@@ -579,13 +602,11 @@ class Game extends GameScene {
 	ctx.restore();
     }
 
-    addBalloon(text: string, pos: Vec2) {
-	let frame = this.balloon.textbox.frame;
-	let x = clamp(0, pos.x - frame.width/2, this.eframe.width-frame.width);
-	let y = clamp(0, pos.y - frame.height, this.eframe.height-frame.height);
-	frame.x = this.eframe.x + x;
-	frame.y = this.eframe.y + y;
-	this.balloon.addDisplay(text, 8);
-	this.balloon.addPause(1);
+    addBalloon(text: string, entity: Entity) {
+	let balloon = new Balloon(this.eframe, entity);
+	balloon.addDisplay(text, 8);
+	let task = balloon.addPause(1);
+	task.stopped.subscribe(() => { balloon.stop(); });
+	this.add(balloon);
     }
 }
