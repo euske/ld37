@@ -4,7 +4,7 @@ PYTHON=python
 SOX=sox
 LAME=lame -t --cbr
 
-AUDIOS=beep.mp3
+AUDIOS=jump.mp3 gun.mp3 speak.mp3 coin.mp3
 
 all: $(AUDIOS)
 

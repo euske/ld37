@@ -208,6 +208,7 @@ class Coin extends Passenger {
     collidedWith(e: Entity) {
 	if (e instanceof Player ||
 	    e instanceof Enemy) {
+	    playSound(SOUNDS['coin']);
 	    this.stop();
 	    this.elevator.vote(this.direction);
 	}
@@ -219,11 +220,13 @@ class Coin extends Passenger {
 //
 class Player extends Passenger {
 
+    fired: Signal;
     usermove = new Vec2();
     direction = new Vec2(1,0);
 
     constructor(elevator: Elevator, pos: Vec2) {
 	super(elevator, pos);
+	this.fired = new Signal(this);
     }
 
     update() {
@@ -244,6 +247,7 @@ class Player extends Passenger {
     fire() {
 	let bullet = new Bullet(this.elevator, this.pos, this.direction.x);
 	this.elevator.addTask(bullet);
+	this.fired.fire();
     }
 }
 
@@ -428,6 +432,7 @@ class Elevator extends Layer {
     openDoor() {
 	this.dooropen = true;
 	this.background = BACKGROUNDS.get(this.floor.bg);
+	playSound(SOUNDS['ring']);
     }
 
     doorClosed(t: number) {
@@ -550,6 +555,8 @@ class Game extends GameScene {
 	// place a player.
 	let p = tilemap.findTile((c:number) => { return (c == T.PLAYER); });
 	this.player = new Player(this.elevator, tilemap.map2coord(p).center());
+	this.player.jumped.subscribe(() => { playSound(SOUNDS['jump']); });
+	this.player.fired.subscribe(() => { playSound(SOUNDS['gun']); });
 	tilemap.set(p.x, p.y, 0);
 	this.elevator.addTask(this.player);
 	// additional thingamabob.
@@ -604,6 +611,7 @@ class Game extends GameScene {
     }
 
     addBalloon(text: string, entity: Entity) {
+	playSound(SOUNDS['speak']);
 	let balloon = new Balloon(this.eframe, entity);
 	balloon.addDisplay(text, 8);
 	let task = balloon.addPause(1);
