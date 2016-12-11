@@ -2,6 +2,9 @@
 /// <reference path="../base/geom.ts" />
 /// <reference path="../base/entity.ts" />
 /// <reference path="../base/text.ts" />
+/// <reference path="../base/tilemap.ts" />
+/// <reference path="../base/sprite.ts" />
+/// <reference path="../base/animation.ts" />
 /// <reference path="../base/scene.ts" />
 /// <reference path="../base/app.ts" />
 
@@ -11,6 +14,7 @@
 
 //  Initialize the resources.
 let FONT: Font;
+let FONT_WARN: Font;
 let SPRITES:SpriteSheet;
 let BACKGROUNDS:SpriteSheet;
 let TILES:SpriteSheet;
@@ -19,6 +23,7 @@ let BULLET = new RectImageSource('white', new Rect(-3,-2,6,4));
 
 addInitHook(() => {
     FONT = new Font(IMAGES['font'], 'white');
+    FONT_WARN = new Font(IMAGES['font'], 'red', 4);
     BACKGROUNDS = new ImageSpriteSheet(
 	IMAGES['backgrounds'], new Vec2(192,192), new Vec2(0,0));
     SPRITES = new ImageSpriteSheet(
@@ -455,8 +460,9 @@ class Elevator extends Layer {
     background: ImageSource = null;
     guest: Guest = null;
 
+    poweron = true;
     dooropen = true;
-    doornext = 10;
+    nextevent = 10;
     gravity = 1;
     
     private _curdoor = 1;
@@ -474,7 +480,7 @@ class Elevator extends Layer {
     vote(direction: number) {
 	// close door.
 	this.dooropen = false;
-	this.doornext = 0;
+	this.nextevent = 0;
 	this.destroyCoins();
     }
 
@@ -495,13 +501,19 @@ class Elevator extends Layer {
 		    this.doorClosed(t);
 		}
 	    }
-	} else if (t < this.doornext) {
+	} else if (t < this.nextevent) {
 	    // waiting...
 	    // 0 < gravity: elevator is up, altitude is up.
 	    // 0 > gravity: elevator is down, altitude is down.
 	} else if (this.dooropen) {
 	    // close door.
 	    this.dooropen = false;
+	} else if (!this.poweron) {
+	    // outage end.
+	    this.endOutage(t);
+	} else if (rnd(4) == 0) {
+	    // outage begin.
+	    this.beginOutage(t);
 	} else {
 	    // open door.
 	    this.openDoor();
@@ -521,14 +533,14 @@ class Elevator extends Layer {
     doorClosed(t: number) {
 	this.gravity = choice([-2, -1, +1, +2]);
 	this.shake = -this.gravity*2;
-	this.doornext = t+5;
+	this.nextevent = t+5;
 	// choose the next floor.
 	this.floor = choice(FLOORS);
     }
 
     doorOpened(t: number) {
 	this.gravity = 1;
-	this.doornext = t+5;
+	this.nextevent = t+5;
 	// add enemies.
 	let p = new Vec2(rnd(this.tilemap.width), 0);
 	let enemy = new Enemy(this, this.tilemap.map2coord(p).center());
@@ -553,6 +565,20 @@ class Elevator extends Layer {
 		this.guest.exit();
 	    }
 	}
+    }
+
+    beginOutage(t: number) {
+	this.poweron = false;
+	this.nextevent = t+5;
+	playSound(SOUNDS['siren']);
+	this.game.makeOutage();
+	this.game.addBalloon('Uh oh.', this.game.player, false);
+    }
+
+    endOutage(t: number) {
+	this.poweron = true;
+	this.nextevent = t+5;
+	this.game.addBalloon('Phew.', this.game.player, false);
     }
 
     destroyCoins() {
@@ -591,37 +617,40 @@ class Elevator extends Layer {
 	ctx.lineWidth = 4;
 	ctx.strokeRect(bx-8, by-8, rect.width+16, rect.height+16);
 
-	// background.
-	if (this._curdoor < 1.0) {
-	    if (this.background !== null) {
-		ctx.save();
-		ctx.translate(bx, by);
-		this.background.render(ctx);
-		ctx.restore();
+	if (this.poweron) {
+	    // background.
+	    if (this._curdoor < 1.0) {
+		if (this.background !== null) {
+		    ctx.save();
+		    ctx.translate(bx, by);
+		    this.background.render(ctx);
+		    ctx.restore();
+		}
 	    }
+
+	    // elevator door.
+	    let w = rect.width*this._curdoor/2;
+	    ctx.fillStyle = '#889999';
+	    ctx.fillRect(bx, by, w, rect.height);
+	    ctx.fillRect(bx+rect.width-w, by, w, rect.height);
+	    ctx.lineWidth = 2;
+	    ctx.strokeStyle = '#444444';
+	    ctx.beginPath();
+	    ctx.moveTo(bx+w-1, by);
+	    ctx.lineTo(bx+w-1, by+rect.height);
+	    ctx.stroke();
+	    ctx.strokeStyle = '#222222';
+	    ctx.beginPath();
+	    ctx.moveTo(bx+rect.width-w+1, by);
+	    ctx.lineTo(bx+rect.width-w+1, by+rect.height);
+	    ctx.stroke();
+
+	    // tilemap and characters.
+	    this.tilemap.renderFromBottomLeft(
+		ctx, bx, by, TILES,
+		(x:number,y:number,c:number)=>{ return c; });
 	}
-
-	// elevator door.
-	let w = rect.width*this._curdoor/2;
-	ctx.fillStyle = '#889999';
-	ctx.fillRect(bx, by, w, rect.height);
-	ctx.fillRect(bx+rect.width-w, by, w, rect.height);
-	ctx.lineWidth = 2;
-	ctx.strokeStyle = '#444444';
-	ctx.beginPath();
-	ctx.moveTo(bx+w-1, by);
-	ctx.lineTo(bx+w-1, by+rect.height);
-	ctx.stroke();
-	ctx.strokeStyle = '#222222';
-	ctx.beginPath();
-	ctx.moveTo(bx+rect.width-w+1, by);
-	ctx.lineTo(bx+rect.width-w+1, by+rect.height);
-	ctx.stroke();
-
-	// tilemap and characters.
-	this.tilemap.renderFromBottomLeft(
-	    ctx, bx, by, TILES,
-	    (x:number,y:number,c:number)=>{ return c; });
+	
 	super.render(ctx, bx, by);
     }
 }
@@ -721,12 +750,25 @@ class Game extends GameScene {
 	ctx.restore();
     }
 
-    addBalloon(text: string, entity: Entity) {
-	playSound(SOUNDS['speak']);
+    addBalloon(text: string, entity: Entity, voiced=true) {
+	if (voiced) {
+	    playSound(SOUNDS['speak']);
+	}
 	let balloon = new Balloon(this.eframe, entity);
 	balloon.addDisplay(text, 8);
 	let task = balloon.addPause(1);
 	task.stopped.subscribe(() => { balloon.stop(); });
 	this.add(balloon);
+    }
+
+    makeOutage() {
+	let textbox = new TextBox(this.eframe, FONT_WARN);
+	textbox.lineSpace = 16;
+	textbox.putText(['POWER', 'OUTAGE'], 'center', 'center');
+	textbox.zOrder = 2;
+	let task = new Blinker(textbox);
+	task.interval = 0.5;
+	task.lifetime = 3.0;
+	this.add(task);
     }
 }
