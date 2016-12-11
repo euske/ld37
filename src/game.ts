@@ -570,14 +570,14 @@ class Elevator extends Layer {
     beginOutage(t: number) {
 	this.poweron = false;
 	this.nextevent = t+5;
-	playSound(SOUNDS['siren']);
-	this.game.makeOutage();
+	this.game.beginOutage();
 	this.game.addBalloon('Uh oh.', this.game.player, false);
     }
 
     endOutage(t: number) {
 	this.poweron = true;
 	this.nextevent = t+5;
+	this.game.endOutage();
 	this.game.addBalloon('Phew.', this.game.player, false);
     }
 
@@ -699,6 +699,8 @@ class Game extends GameScene {
 	// additional thingamabob.
 	this.statusBox = new TextBox(this.screen.resize(100, 100, -1, +1), FONT);
 	this.score = 0;
+	// start music.
+	APP.setMusic(SOUNDS['music']);
     }
 
     tick(t: number) {
@@ -761,7 +763,7 @@ class Game extends GameScene {
 	this.add(balloon);
     }
 
-    makeOutage() {
+    beginOutage() {
 	let textbox = new TextBox(this.eframe, FONT_WARN);
 	textbox.lineSpace = 16;
 	textbox.putText(['POWER', 'OUTAGE'], 'center', 'center');
@@ -769,6 +771,16 @@ class Game extends GameScene {
 	let task = new Blinker(textbox);
 	task.interval = 0.5;
 	task.lifetime = 3.0;
+	this.add(task);
+	APP.setMusic();
+	let task2 = new SoundTask(SOUNDS['outage']);
+	task2.stopped.subscribe(() => { playSound(SOUNDS['siren']); });
+	this.add(task2);
+    }
+
+    endOutage() {
+	let task = new SoundTask(SOUNDS['poweron']);
+	task.stopped.subscribe(() => { APP.setMusic(SOUNDS['music']); });
 	this.add(task);
     }
 }
