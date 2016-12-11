@@ -20,16 +20,8 @@ addInitHook(() => {
     FONT = new Font(IMAGES['font'], 'white');
     BACKGROUNDS = new ImageSpriteSheet(
 	IMAGES['backgrounds'], new Vec2(192,192), new Vec2(0,0));
-    //SPRITES = new ImageSpriteSheet(
-    //IMAGES['sprites'], new Vec2(16,16), new Vec2(8,8));
-    SPRITES = new SimpleSpriteSheet(
-	[new RectImageSource('green', new Rect(-8,-8,16,16)), // player
-	 new RectImageSource('purple', new Rect(-8,-8,16,16)), // enemy
-	 new RectImageSource('pink', new Rect(-8,-8,16,16)), // guest
-	 new RectImageSource('gray', new Rect(-4,-4,8,8)), // puff
-	 new OvalImageSource('yellow', new Rect(-8,-8,16,16)), // yellow coin
-	 new OvalImageSource('red', new Rect(-8,-8,16,16)), // red coin
-	]);
+    SPRITES = new ImageSpriteSheet(
+	IMAGES['sprites'], new Vec2(16,16), new Vec2(8,8));
     TILES = new SimpleSpriteSheet(
 	[new RectImageSource(null, new Rect(0,0,16,16)), // 0
 	 new RectImageSource('red', new Rect(0,0,16,16)), // 1
@@ -40,11 +32,15 @@ addInitHook(() => {
 
 enum S {
     PLAYER = 0,
-    ENEMY = 1,
-    GUEST = 2,
-    PUFF = 3,
-    COIN0 = 4,
-    COIN1 = 5,
+    GUEST0 = 1,
+    GUEST1 = 2,
+    GUEST2 = 3,
+    GUEST3 = 4,
+    GUEST4 = 5,
+    PUFF = 6,
+    SHADOW = 6,
+    COIN = 7,
+    ENEMY = 8,
 };
 
 enum T {
@@ -151,6 +147,7 @@ class Passenger extends PhysicalEntity {
 	super(pos);
 	this.elevator = elevator;
 	this.tilemap = elevator.tilemap;
+	this.collider = SPRITES.get(0).getBounds();
 	this.jumpfunc = ((vy:number, t:number) => {
 	    return (0 <= t && t <= 5)? -6 : vy+this.elevator.gravity;
 	});
@@ -191,8 +188,7 @@ class Coin extends Passenger {
 
     constructor(elevator: Elevator, pos: Vec2, direction=0) {
 	super(elevator, pos);
-	this.sprite.imgsrc = SPRITES.get((0 < direction)? S.COIN0 : S.COIN1);
-	this.collider = this.sprite.getBounds(new Vec2());
+	this.sprite.imgsrc = SPRITES.get(S.COIN, (0 < direction)? 0 : 1);
 	this.movement = new Vec2(rnd(2)*2-1, 0).scale(2);
 	this.direction = direction;
     }
@@ -228,19 +224,20 @@ class Player extends Passenger {
 
     constructor(elevator: Elevator, pos: Vec2) {
 	super(elevator, pos);
-	this.sprite.imgsrc = SPRITES.get(S.PLAYER);
-	this.collider = this.sprite.getBounds(new Vec2());
     }
 
     update() {
 	super.update();
 	this.moveIfPossible(this.usermove);
+	let i = phase(this.getTime(), 0.5);
+	this.sprite.imgsrc = SPRITES.get(S.PLAYER, i);
     }
     
     setMove(v: Vec2) {
 	this.usermove.x = v.x*4;
 	if (v.x != 0) {
 	    this.direction.x = v.x;
+	    this.sprite.scale.x = v.x;
 	}
     }
 
@@ -259,15 +256,16 @@ class Enemy extends Passenger {
 
     constructor(elevator: Elevator, pos: Vec2) {
 	super(elevator, pos);
-	this.sprite.imgsrc = SPRITES.get(S.ENEMY);
-	this.collider = this.sprite.getBounds(new Vec2());
     }
 
     update() {
 	super.update();
+	let i = phase(this.getTime(), 0.5);
+	this.sprite.imgsrc = SPRITES.get(S.ENEMY, i);
 	if (rnd(10) == 0) {
 	    let vx = rnd(3)-1;
 	    this.movement.x = vx*2;
+	    this.sprite.scale.x = vx;
 	    if (vx == 0) {
 		this.setJump(0);
 	    }
@@ -289,20 +287,23 @@ class Enemy extends Passenger {
 class Guest extends Passenger {
 
     movement = new Vec2();
+    type: number
     goal: FloorInfo;
 
     constructor(elevator: Elevator, pos: Vec2) {
 	super(elevator, pos);
-	this.sprite.imgsrc = SPRITES.get(S.GUEST);
-	this.collider = this.sprite.getBounds(new Vec2());
+	this.type = rnd(5);
 	this.goal = choice(FLOORS);
     }
 
     update() {
 	super.update();
+	let i = phase(this.getTime(), 0.5);
+	this.sprite.imgsrc = SPRITES.get(S.GUEST0+this.type, i);
 	if (rnd(10) == 0) {
 	    let vx = rnd(3)-1;
 	    this.movement.x = vx*2;
+	    this.sprite.scale.x = vx;
 	    if (vx == 0) {
 		this.setJump(0);
 	    }
@@ -347,7 +348,7 @@ class Balloon extends DialogBox {
 	let pos = this.entity.pos;
 	let frame = this.textbox.frame;
 	let x = clamp(0, pos.x - frame.width/2, this.eframe.width-frame.width);
-	let y = clamp(0, pos.y - frame.height, this.eframe.height-frame.height);
+	let y = clamp(0, pos.y - 10 - frame.height, this.eframe.height-frame.height);
 	frame.x = this.eframe.x + x;
 	frame.y = this.eframe.y + y;
     }
