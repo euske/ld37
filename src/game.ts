@@ -14,6 +14,7 @@ let FONT: Font;
 let SPRITES:SpriteSheet;
 let BACKGROUNDS:SpriteSheet;
 let TILES:SpriteSheet;
+let SHADOW:HTMLImageSource;
 let BULLET = new RectImageSource('white', new Rect(-3,-2,6,4));
 
 addInitHook(() => {
@@ -24,6 +25,8 @@ addInitHook(() => {
 	IMAGES['sprites'], new Vec2(16,16), new Vec2(8,8));
     TILES = new ImageSpriteSheet(
 	IMAGES['tiles'], new Vec2(16,16), new Vec2(0,0));
+    SHADOW = SPRITES.get(S.SHADOW, 1) as HTMLImageSource;
+    SHADOW.dstRect = new Rect(-8, -6, 16, 16);
 });
 
 enum S {
@@ -78,11 +81,14 @@ const FLOORS = [
 class GuestInfo {
     sp: number;
     floors: FloorInfo[];
-    lines: string[];
-    constructor(sp: number, floors: FloorInfo[], lines: string[]) {
+    lines0: string[];
+    lines1: string[];
+    constructor(sp: number, floors: FloorInfo[],
+		lines0: string[], lines1: string[]) {
 	this.sp = sp;
 	this.floors = floors;
-	this.lines = lines;
+	this.lines0 = lines0;
+	this.lines1 = lines1;
     }
 }
 
@@ -90,23 +96,28 @@ const GUESTS = [
     new GuestInfo(
 	S.GUEST_WORKER1,
 	[FLOORS[0], FLOORS[1], FLOORS[2], FLOORS[3], FLOORS[4], FLOORS[5]],
-	["Hi, could you get me to ", "Morning, please go to "]),
+	["Hi, could you get me to ", "Morning, please go to "],
+	["Thank you!", "Thankee~~"]),
     new GuestInfo(
 	S.GUEST_WORKER2,
 	[FLOORS[1], FLOORS[3], FLOORS[5], FLOORS[6], FLOORS[6]],
-	["Hiya, can you get me to ", "Hey, let me go to "]),
+	["Hiya, let me get to ", "I'm supposed to be at "],
+	["Hey, thanks!", "I'm late!"]),
     new GuestInfo(
 	S.GUEST_TARZAN,
 	[FLOORS[0], FLOORS[2]],
-	["Hey! Me go to ", "Excuse me, I'd like to go to "]),
+	["Hey! Me go to ", "Excuse me, I'd like to go to "],
+	["Thank you."]),
     new GuestInfo(
 	S.GUEST_TOURIST,
 	[FLOORS[2], FLOORS[4]],
-	["Hi, where's ", "I wanna go to "]),
+	["Hi, where's ", "I wanna go to "],
+	["Thanks, dude!"]),
     new GuestInfo(
 	S.GUEST_ASTRONAUT,
 	[FLOORS[7]],
-	["Please take me to "]),
+	["Please take me to ", "!@#$%^&>_ <\*+ "],
+	["Thank you very much!"]),
 ];
 
 function drawArrow(ctx: CanvasRenderingContext2D, y: number) {
@@ -122,7 +133,6 @@ function drawArrow(ctx: CanvasRenderingContext2D, y: number) {
     ctx.closePath();
     ctx.fill();
 }
-
 
 
 
@@ -171,6 +181,7 @@ class Passenger extends PhysicalEntity {
 
     elevator: Elevator;
     tilemap: TileMap;
+    shadow: Sprite;
     downjump = false;
 
     constructor(elevator: Elevator, pos: Vec2) {
@@ -181,10 +192,28 @@ class Passenger extends PhysicalEntity {
 	this.jumpfunc = ((vy:number, t:number) => {
 	    return (0 <= t && t <= 5)? -6 : vy+this.elevator.gravity;
 	});
+	this.shadow = new EntitySprite(this);
+	this.shadow.imgsrc = SHADOW;
+	this.shadow.zOrder = -1;
     }
-
+    
+    start() {
+	super.start();
+	this.layer.addSprite(this.shadow);
+    }
+    
+    stop() {
+	this.layer.removeSprite(this.shadow);
+	super.stop();
+    }
+    
+    update() {
+	super.update();
+	this.shadow.visible = this.isLanded();
+    }
+    
     getFencesFor(range: Rect, v: Vec2, context: string): Rect[] {
-	return [this.tilemap.bounds];
+	return [this.elevator.bounds];
     }
 
     getObstaclesFor(range: Rect, v: Vec2, context: string): Rect[] {
@@ -215,24 +244,31 @@ class Coin extends Passenger {
 
     movement: Vec2;
     direction: number;
+    rotation = 0;
 
     constructor(elevator: Elevator, pos: Vec2, direction=0) {
 	super(elevator, pos);
 	this.sprite.imgsrc = SPRITES.get(S.COIN, (0 < direction)? 0 : 1);
 	this.movement = new Vec2(rnd(2)*2-1, 0).scale(2);
 	this.direction = direction;
+	this.rotation = Math.random()-0.5;
     }
 
     update() {
-	super.update();
 	let v = this.moveIfPossible(this.movement);
 	if (v.isZero()) {
 	    this.movement.x = -this.movement.x;
 	}
 	if (3 <= this.getTime()) {
-	    this.stop();
-	    this.elevator.addPuff(this.pos);
+	    this.destroy();
 	}
+	this.sprite.rotation += this.rotation;
+	super.update();
+    }
+
+    destroy() {
+	this.stop();
+	this.elevator.addPuff(this.pos);
     }
 
     collidedWith(e: Entity) {
@@ -260,10 +296,10 @@ class Player extends Passenger {
     }
 
     update() {
-	super.update();
 	this.moveIfPossible(this.usermove);
 	let i = phase(this.getTime(), 0.5);
 	this.sprite.imgsrc = SPRITES.get(S.PLAYER, i);
+	super.update();
     }
     
     setMove(v: Vec2) {
@@ -293,7 +329,6 @@ class Enemy extends Passenger {
     }
 
     update() {
-	super.update();
 	let i = phase(this.getTime(), 0.5);
 	this.sprite.imgsrc = SPRITES.get(S.ENEMY, i);
 	if (rnd(10) == 0) {
@@ -305,10 +340,12 @@ class Enemy extends Passenger {
 	    }
 	}
 	this.moveIfPossible(this.movement);
+	super.update();
     }
 
     collidedWith(e: Entity) {
 	if (e instanceof Bullet) {
+	    e.stop();
 	    this.stop();
 	    this.elevator.addPuff(this.pos);
 	}
@@ -323,7 +360,7 @@ class Guest extends Passenger {
     movement = new Vec2();
     info: GuestInfo;
     goal: FloorInfo;
-    line: string;
+    exiting = false;
 
     constructor(elevator: Elevator, pos: Vec2, info: GuestInfo) {
 	super(elevator, pos);
@@ -332,14 +369,16 @@ class Guest extends Passenger {
 	    this.goal = choice(info.floors);
 	    if (this.goal !== elevator.floor) break;
 	}
-	this.line = choice(info.lines);
     }
 
     update() {
-	super.update();
 	let i = phase(this.getTime(), 0.5);
 	this.sprite.imgsrc = SPRITES.get(this.info.sp, i);
-	if (rnd(10) == 0) {
+	if (this.exiting) {
+	    if (Math.abs(this.pos.x - this.elevator.bounds.centerx()) < 16) {
+		this.stop();
+	    }
+	} else if (rnd(10) == 0) {
 	    let vx = rnd(3)-1;
 	    this.movement.x = vx*2;
 	    this.sprite.scale.x = vx;
@@ -348,15 +387,22 @@ class Guest extends Passenger {
 	    }
 	}
 	this.moveIfPossible(this.movement);
+	super.update();
     }
 
     exit() {
-	// XXX move towards the door.
-	this.stop();
+	this.exiting = true;
+	this.movement.x = ((this.pos.x < this.elevator.bounds.centerx())? +4 : -4);
     }
 
-    getLine() {
-	return (this.line+' '+this.goal.name+'?');
+    getLine0() {
+	let line = choice(this.info.lines0);
+	return (line+this.goal.name+'?');
+    }	
+
+    getLine1() {
+	let line = choice(this.info.lines1);
+	return line;
     }	
 }
 
@@ -401,6 +447,7 @@ class Elevator extends Layer {
 
     game: Game;
     tilemap: TileMap;
+    bounds: Rect;
     basepos = 0;
     shake = 0;
 
@@ -418,6 +465,7 @@ class Elevator extends Layer {
 	super();
 	this.game = game;
 	this.tilemap = tilemap;
+	this.bounds = tilemap.bounds;
 	
 	this.floor = FLOORS[2];	// lobby
 	this.openDoor();
@@ -427,6 +475,7 @@ class Elevator extends Layer {
 	// close door.
 	this.dooropen = false;
 	this.doornext = 0;
+	this.destroyCoins();
     }
 
     tick(t: number) {
@@ -440,7 +489,6 @@ class Elevator extends Layer {
 	    } else {
 		// door open/close completed.
 		this._curdoor = door;
-		// update gravity.
 		if (door == 0) {
 		    this.doorOpened(t);
 		} else {
@@ -493,23 +541,34 @@ class Elevator extends Layer {
 	let coin2 = new Coin(this, this.tilemap.map2coord(p).center(), +1);
 	this.addTask(coin2);
 	// remove the guest.
-	if (this.guest !== null) {
+	if (this.guest === null) {
+	    this.spawnGuest();
+	} else {
 	    if (this.guest.goal === this.floor) {
+		this.game.addBalloon(this.guest.getLine1(), this.guest);
+		this.guest.stopped.subscribe(() => {
+		    this.guest = null;
+		    this.spawnGuest();
+		});
 		this.guest.exit();
-		this.guest = null;
 	    }
 	}
-	// add the guest.
-	if (this.guest === null) {
-	    let info = choice(GUESTS);
-	    let p = new Vec2(this.tilemap.bounds.width/2, 8);
-	    this.guest = new Guest(this, p, info);
-	    this.guest.stopped.subscribe(() => {
-		this.guest = null;
-	    });
-	    this.addTask(this.guest);
-	    this.game.addBalloon(this.guest.getLine(), this.guest);
+    }
+
+    destroyCoins() {
+	for (let e of this.entities) {
+	    if (e instanceof Coin) {
+		e.destroy();
+	    }
 	}
+    }
+
+    spawnGuest() {
+	let info = choice(GUESTS); // XXX depends on the current score.
+	let x = (rnd(2) == 0)? (this.bounds.x+8) : (this.bounds.right()-8);
+	this.guest = new Guest(this, new Vec2(x, this.bounds.bottom()-24), info);
+	this.addTask(this.guest);
+	this.game.addBalloon(this.guest.getLine0(), this.guest);
     }
 
     getFloor() {
@@ -526,7 +585,7 @@ class Elevator extends Layer {
     
     render(ctx: CanvasRenderingContext2D, bx: number, by: number) {
 	by += this.basepos;
-	let rect = this.tilemap.bounds;
+	let rect = this.bounds;
 	// frame.
 	ctx.strokeStyle = 'gray';
 	ctx.lineWidth = 4;
@@ -547,6 +606,17 @@ class Elevator extends Layer {
 	ctx.fillStyle = '#889999';
 	ctx.fillRect(bx, by, w, rect.height);
 	ctx.fillRect(bx+rect.width-w, by, w, rect.height);
+	ctx.lineWidth = 2;
+	ctx.strokeStyle = '#444444';
+	ctx.beginPath();
+	ctx.moveTo(bx+w-1, by);
+	ctx.lineTo(bx+w-1, by+rect.height);
+	ctx.stroke();
+	ctx.strokeStyle = '#222222';
+	ctx.beginPath();
+	ctx.moveTo(bx+rect.width-w+1, by);
+	ctx.lineTo(bx+rect.width-w+1, by+rect.height);
+	ctx.stroke();
 
 	// tilemap and characters.
 	this.tilemap.renderFromBottomLeft(
@@ -566,6 +636,7 @@ class Game extends GameScene {
     tilemap: TileMap;
     player: Player;
     statusBox: TextBox;
+    score: number;
     
     init() {
 	super.init();
@@ -598,6 +669,7 @@ class Game extends GameScene {
 	this.elevator.addTask(this.player);
 	// additional thingamabob.
 	this.statusBox = new TextBox(this.screen.resize(100, 100, -1, +1), FONT);
+	this.score = 0;
     }
 
     tick(t: number) {
@@ -610,6 +682,8 @@ class Game extends GameScene {
 	    this.statusBox.addSegment(new Vec2(4,96), 'GOAL:');
 	    this.statusBox.addSegment(new Vec2(4,106), guest.goal.name);
 	}
+	this.statusBox.addSegment(new Vec2(4,200), 'GUESTS SAVED:');
+	this.statusBox.addSegment(new Vec2(4,216), this.score.toString());
     }
 
     onDirChanged(v: Vec2) {

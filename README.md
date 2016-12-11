@@ -4,8 +4,10 @@ Base library: https://github.com/euske/euskit/
 
 TODOs:
 
- * sound, music
- * tiles
+ * music
  * enemuu sprites
+ * death
+ * scoring
+ * title/ending
 
- * power outage
+ * power outage?
