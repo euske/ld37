@@ -22,21 +22,17 @@ addInitHook(() => {
 	IMAGES['backgrounds'], new Vec2(192,192), new Vec2(0,0));
     SPRITES = new ImageSpriteSheet(
 	IMAGES['sprites'], new Vec2(16,16), new Vec2(8,8));
-    TILES = new SimpleSpriteSheet(
-	[new RectImageSource(null, new Rect(0,0,16,16)), // 0
-	 new RectImageSource('red', new Rect(0,0,16,16)), // 1
-	 new RectImageSource('red', new Rect(0,0,16,8)),  // 2
-	 null, null, null, null, null, null, null, null
-	]);
+    TILES = new ImageSpriteSheet(
+	IMAGES['tiles'], new Vec2(16,16), new Vec2(0,0));
 });
 
 enum S {
     PLAYER = 0,
-    GUEST0 = 1,
-    GUEST1 = 2,
-    GUEST2 = 3,
-    GUEST3 = 4,
-    GUEST4 = 5,
+    GUEST_WORKER1 = 1,
+    GUEST_WORKER2 = 2,
+    GUEST_TARZAN = 3,
+    GUEST_TOURIST = 4,
+    GUEST_ASTRONAUT = 5,
     PUFF = 6,
     SHADOW = 6,
     COIN = 7,
@@ -69,14 +65,48 @@ class FloorInfo {
 }
 
 const FLOORS = [
-    new FloorInfo(-2, 'B2: JUNGLE', B.JUNGLE),
-    new FloorInfo(-1, 'B1: OFFICE', B.OFFICE),
-    new FloorInfo(0, 'LOBBY', B.OFFICE),
-    new FloorInfo(1, 'F1: OFFICE', B.OFFICE),
-    new FloorInfo(2, 'F2: BEACH', B.BEACH),
-    new FloorInfo(4, 'F4: OFFICE', B.OFFICE),
-    new FloorInfo(7, 'F7: OFFICE', B.OFFICE),
-    new FloorInfo(10, 'F2947: ORBIT', B.SPACE),
+    new FloorInfo(-2, 'B2: JUNGLE', B.JUNGLE), // 0
+    new FloorInfo(-1, 'B1: OFFICE', B.OFFICE), // 1
+    new FloorInfo(0, 'LOBBY', B.OFFICE),       // 2
+    new FloorInfo(1, 'F1: OFFICE', B.OFFICE),  // 3
+    new FloorInfo(2, 'F2: BEACH', B.BEACH),    // 4
+    new FloorInfo(4, 'F4: OFFICE', B.OFFICE),  // 5
+    new FloorInfo(7, 'F7: OFFICE', B.OFFICE),  // 6
+    new FloorInfo(10, 'F2947: ORBIT', B.SPACE), // 7
+];
+
+class GuestInfo {
+    sp: number;
+    floors: FloorInfo[];
+    lines: string[];
+    constructor(sp: number, floors: FloorInfo[], lines: string[]) {
+	this.sp = sp;
+	this.floors = floors;
+	this.lines = lines;
+    }
+}
+
+const GUESTS = [
+    new GuestInfo(
+	S.GUEST_WORKER1,
+	[FLOORS[0], FLOORS[1], FLOORS[2], FLOORS[3], FLOORS[4], FLOORS[5]],
+	["Hi, could you get me to ", "Morning, please go to "]),
+    new GuestInfo(
+	S.GUEST_WORKER2,
+	[FLOORS[1], FLOORS[3], FLOORS[5], FLOORS[6], FLOORS[6]],
+	["Hiya, can you get me to ", "Hey, let me go to "]),
+    new GuestInfo(
+	S.GUEST_TARZAN,
+	[FLOORS[0], FLOORS[2]],
+	["Hey! Me go to ", "Excuse me, I'd like to go to "]),
+    new GuestInfo(
+	S.GUEST_TOURIST,
+	[FLOORS[2], FLOORS[4]],
+	["Hi, where's ", "I wanna go to "]),
+    new GuestInfo(
+	S.GUEST_ASTRONAUT,
+	[FLOORS[7]],
+	["Please take me to "]),
 ];
 
 function drawArrow(ctx: CanvasRenderingContext2D, y: number) {
@@ -291,19 +321,24 @@ class Enemy extends Passenger {
 class Guest extends Passenger {
 
     movement = new Vec2();
-    type: number
+    info: GuestInfo;
     goal: FloorInfo;
+    line: string;
 
-    constructor(elevator: Elevator, pos: Vec2) {
+    constructor(elevator: Elevator, pos: Vec2, info: GuestInfo) {
 	super(elevator, pos);
-	this.type = rnd(5);
-	this.goal = choice(FLOORS);
+	this.info = info;
+	while (true) {
+	    this.goal = choice(info.floors);
+	    if (this.goal !== elevator.floor) break;
+	}
+	this.line = choice(info.lines);
     }
 
     update() {
 	super.update();
 	let i = phase(this.getTime(), 0.5);
-	this.sprite.imgsrc = SPRITES.get(S.GUEST0+this.type, i);
+	this.sprite.imgsrc = SPRITES.get(this.info.sp, i);
 	if (rnd(10) == 0) {
 	    let vx = rnd(3)-1;
 	    this.movement.x = vx*2;
@@ -321,7 +356,7 @@ class Guest extends Passenger {
     }
 
     getLine() {
-	return ('HEY! CAN YOU GET ME TO '+this.goal.name+'?');
+	return (this.line+' '+this.goal.name+'?');
     }	
 }
 
@@ -352,7 +387,7 @@ class Balloon extends DialogBox {
 	let pos = this.entity.pos;
 	let frame = this.textbox.frame;
 	let x = clamp(0, pos.x - frame.width/2, this.eframe.width-frame.width);
-	let y = clamp(0, pos.y - 10 - frame.height, this.eframe.height-frame.height);
+	let y = clamp(0, pos.y - 16 - frame.height, this.eframe.height-frame.height);
 	frame.x = this.eframe.x + x;
 	frame.y = this.eframe.y + y;
     }
@@ -466,7 +501,9 @@ class Elevator extends Layer {
 	}
 	// add the guest.
 	if (this.guest === null) {
-	    this.guest = new Guest(this, new Vec2(this.tilemap.bounds.width/2, 8));
+	    let info = choice(GUESTS);
+	    let p = new Vec2(this.tilemap.bounds.width/2, 8);
+	    this.guest = new Guest(this, p, info);
 	    this.guest.stopped.subscribe(() => {
 		this.guest = null;
 	    });
