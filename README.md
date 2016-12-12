@@ -9,5 +9,3 @@ TODOs:
  * death
  * scoring
  * title/ending
-
- * power outage?

@@ -64,23 +64,25 @@ enum B {
 class FloorInfo {
     y: number;
     name: string;
+    info: string;
     bg: number;
-    constructor(y: number, name: string, bg=B.OFFICE) {
+    constructor(y: number, name: string, info: string, bg=B.OFFICE) {
 	this.y = y;
 	this.name = name;
+	this.info = info;
 	this.bg = bg;
     }
 }
 
 const FLOORS = [
-    new FloorInfo(-2, 'B2: JUNGLE', B.JUNGLE), // 0
-    new FloorInfo(-1, 'B1: OFFICE', B.OFFICE), // 1
-    new FloorInfo(0, 'LOBBY', B.OFFICE),       // 2
-    new FloorInfo(1, 'F1: OFFICE', B.OFFICE),  // 3
-    new FloorInfo(2, 'F2: BEACH', B.BEACH),    // 4
-    new FloorInfo(4, 'F4: OFFICE', B.OFFICE),  // 5
-    new FloorInfo(7, 'F7: OFFICE', B.OFFICE),  // 6
-    new FloorInfo(10, 'F2947: ORBIT', B.SPACE), // 7
+    new FloorInfo(-2, 'B2', 'JUNGLE', B.JUNGLE), // 0
+    new FloorInfo(-1, 'B1', 'OFFICE', B.OFFICE), // 1
+    new FloorInfo(0, 'LOBBY', '', B.OFFICE),       // 2
+    new FloorInfo(1, 'F1', 'OFFICE', B.OFFICE),  // 3
+    new FloorInfo(2, 'F2', 'BEACH', B.BEACH),    // 4
+    new FloorInfo(4, 'F4', 'OFFICE', B.OFFICE),  // 5
+    new FloorInfo(7, 'F7', 'OFFICE', B.OFFICE),  // 6
+    new FloorInfo(10, 'F2947', 'ORBIT', B.SPACE), // 7
 ];
 
 class GuestInfo {
@@ -101,27 +103,27 @@ const GUESTS = [
     new GuestInfo(
 	S.GUEST_WORKER1,
 	[FLOORS[0], FLOORS[1], FLOORS[2], FLOORS[3], FLOORS[4], FLOORS[5]],
-	["Hi, could you get me to ", "Morning, please go to "],
+	["Hi, could you get me to ?", "Morning, please go to ."],
 	["Thank you!", "Thankee~~"]),
     new GuestInfo(
 	S.GUEST_WORKER2,
 	[FLOORS[1], FLOORS[3], FLOORS[5], FLOORS[6], FLOORS[6]],
-	["Hiya, let me get to ", "I'm supposed to be at "],
+	["Hiya, let me get to !", "I'm supposed to be at ."],
 	["Hey, thanks!", "I'm late!"]),
     new GuestInfo(
 	S.GUEST_TARZAN,
 	[FLOORS[0], FLOORS[2]],
-	["Hey! Me go to ", "Excuse me, I'd like to go to "],
+	["Hey! Me go to !", "Excuse me, I'd like to go to ."],
 	["Thank you."]),
     new GuestInfo(
 	S.GUEST_TOURIST,
 	[FLOORS[2], FLOORS[4]],
-	["Hi, where's ", "I wanna go to "],
+	["Hi, where's ?", "I wanna go to !"],
 	["Thanks, dude!"]),
     new GuestInfo(
 	S.GUEST_ASTRONAUT,
 	[FLOORS[7]],
-	["Please take me to ", "!@#$%^&>_ <\*+ "],
+	["Please take me to .", "!@#$%^&>_ <\*+ ?"],
 	["Thank you very much!"]),
 ];
 
@@ -249,14 +251,12 @@ class Coin extends Passenger {
 
     movement: Vec2;
     direction: number;
-    rotation = 0;
 
     constructor(elevator: Elevator, pos: Vec2, direction=0) {
 	super(elevator, pos);
 	this.sprite.imgsrc = SPRITES.get(S.COIN, (0 < direction)? 0 : 1);
 	this.movement = new Vec2(rnd(2)*2-1, 0).scale(2);
 	this.direction = direction;
-	this.rotation = Math.random()-0.5;
     }
 
     update() {
@@ -264,10 +264,7 @@ class Coin extends Passenger {
 	if (v.isZero()) {
 	    this.movement.x = -this.movement.x;
 	}
-	if (3 <= this.getTime()) {
-	    this.destroy();
-	}
-	this.sprite.rotation += this.rotation;
+	this.sprite.rotation += this.movement.x*0.1;
 	super.update();
     }
 
@@ -308,6 +305,22 @@ class Player extends Passenger {
     }
     
     setMove(v: Vec2) {
+	if (0 < this.elevator.gravity) {
+	    if (v.y < 0) {
+		this.setJump(+Infinity);
+		this.downjump = false;
+	    } else if (0 < v.y) {
+		this.setJump(0);
+		this.downjump = true;
+	    } else {
+		this.setJump(0);
+		this.downjump = false;
+	    }
+	    this.usermove.y = 0;
+	} else {
+	    this.usermove.y = v.y*2;
+	}
+	
 	this.usermove.x = v.x*4;
 	if (v.x != 0) {
 	    this.direction.x = v.x;
@@ -370,9 +383,10 @@ class Guest extends Passenger {
     constructor(elevator: Elevator, pos: Vec2, info: GuestInfo) {
 	super(elevator, pos);
 	this.info = info;
+	let floor = elevator.getFloor();
 	while (true) {
 	    this.goal = choice(info.floors);
-	    if (this.goal !== elevator.floor) break;
+	    if (this.goal !== floor) break;
 	}
     }
 
@@ -397,18 +411,25 @@ class Guest extends Passenger {
 
     exit() {
 	this.exiting = true;
-	this.movement.x = ((this.pos.x < this.elevator.bounds.centerx())? +4 : -4);
+	this.movement.x = ((this.pos.x < this.elevator.bounds.centerx())? +2 : -2);
     }
 
     getLine0() {
 	let line = choice(this.info.lines0);
-	return (line+this.goal.name+'?');
+	let n = line.length;
+	return (line.substr(0,n-1)+this.goal.name+line.substr(n-1));
     }	
 
     getLine1() {
 	let line = choice(this.info.lines1);
 	return line;
     }	
+
+    collidedWith(e: Entity) {
+	if (e instanceof Bullet) {
+	    e.stop();
+	}
+    }
 }
 
 
@@ -456,13 +477,14 @@ class Elevator extends Layer {
     basepos = 0;
     shake = 0;
 
-    floor: FloorInfo = null;
+    floorIndex = 2;
     background: ImageSource = null;
     guest: Guest = null;
 
     poweron = true;
     dooropen = true;
-    nextevent = 10;
+    nextevent = 0;
+    direction = 0;
     gravity = 1;
     
     private _curdoor = 1;
@@ -472,12 +494,15 @@ class Elevator extends Layer {
 	this.game = game;
 	this.tilemap = tilemap;
 	this.bounds = tilemap.bounds;
-	
-	this.floor = FLOORS[2];	// lobby
-	this.openDoor();
     }
 
+    init() {
+	super.init();
+	this.openDoor();
+    }
+    
     vote(direction: number) {
+	this.direction = direction;
 	// close door.
 	this.dooropen = false;
 	this.nextevent = 0;
@@ -507,11 +532,11 @@ class Elevator extends Layer {
 	    // 0 > gravity: elevator is down, altitude is down.
 	} else if (this.dooropen) {
 	    // close door.
-	    this.dooropen = false;
+	    this.closeDoor();
 	} else if (!this.poweron) {
 	    // outage end.
 	    this.endOutage(t);
-	} else if (rnd(4) == 0) {
+	} else if (Math.random() < this.game.getOutageProb()) {
 	    // outage begin.
 	    this.beginOutage(t);
 	} else {
@@ -525,22 +550,28 @@ class Elevator extends Layer {
     }
 
     openDoor() {
+	this.floorIndex = clamp(0, this.floorIndex+this.direction, FLOORS.length-1);
+	this.background = BACKGROUNDS.get(this.getFloor().bg);
 	this.dooropen = true;
-	this.background = BACKGROUNDS.get(this.floor.bg);
+	this.game.updateStatus();
 	playSound(SOUNDS['ring']);
     }
 
+    closeDoor() {
+	this.dooropen = false;
+	playSound(SOUNDS['ring']);
+    }
+    
     doorClosed(t: number) {
-	this.gravity = choice([-2, -1, +1, +2]);
+	this.gravity = this.direction;
 	this.shake = -this.gravity*2;
-	this.nextevent = t+5;
-	// choose the next floor.
-	this.floor = choice(FLOORS);
+	this.nextevent = t+rnd(5, 10);
     }
 
     doorOpened(t: number) {
+	this.shake = -this.gravity*2;
 	this.gravity = 1;
-	this.nextevent = t+5;
+	this.nextevent = Infinity;
 	// add enemies.
 	let p = new Vec2(rnd(this.tilemap.width), 0);
 	let enemy = new Enemy(this, this.tilemap.map2coord(p).center());
@@ -556,10 +587,11 @@ class Elevator extends Layer {
 	if (this.guest === null) {
 	    this.spawnGuest();
 	} else {
-	    if (this.guest.goal === this.floor) {
+	    if (this.guest.goal === this.getFloor()) {
 		this.game.addBalloon(this.guest.getLine1(), this.guest);
 		this.guest.stopped.subscribe(() => {
 		    this.guest = null;
+		    this.game.addScore();
 		    this.spawnGuest();
 		});
 		this.guest.exit();
@@ -569,14 +601,14 @@ class Elevator extends Layer {
 
     beginOutage(t: number) {
 	this.poweron = false;
-	this.nextevent = t+5;
+	this.nextevent = t+rnd(5, 8);
 	this.game.beginOutage();
 	this.game.addBalloon('Uh oh.', this.game.player, false);
     }
 
     endOutage(t: number) {
 	this.poweron = true;
-	this.nextevent = t+5;
+	this.nextevent = t+rnd(5, 10);
 	this.game.endOutage();
 	this.game.addBalloon('Phew.', this.game.player, false);
     }
@@ -590,19 +622,16 @@ class Elevator extends Layer {
     }
 
     spawnGuest() {
-	let info = choice(GUESTS); // XXX depends on the current score.
+	let info = this.game.chooseGuest();
 	let x = (rnd(2) == 0)? (this.bounds.x+8) : (this.bounds.right()-8);
 	this.guest = new Guest(this, new Vec2(x, this.bounds.bottom()-24), info);
 	this.addTask(this.guest);
+	this.game.updateStatus();
 	this.game.addBalloon(this.guest.getLine0(), this.guest);
     }
 
     getFloor() {
-	if (this.dooropen) {
-	    return this.floor.name;
-	} else {
-	    return '---';
-	}
+	return FLOORS[this.floorIndex];
     }
 
     addPuff(pos: Vec2) {
@@ -669,6 +698,7 @@ class Game extends GameScene {
     
     init() {
 	super.init();
+	this.score = 0;
 	// prepare the map.
 	const MAP = [ // 12x12
 	    '000000000000',
@@ -689,46 +719,28 @@ class Game extends GameScene {
 	this.eframe = this.screen.resize(tilemap.bounds.width, tilemap.bounds.height, +1);
 	this.eframe.x += 16;
 	this.elevator = new Elevator(this, tilemap);
+	this.statusBox = new TextBox(this.screen.resize(100, 100, -1, +1), FONT);
 	// place a player.
 	let p = tilemap.findTile((c:number) => { return (c == T.PLAYER); });
 	this.player = new Player(this.elevator, tilemap.map2coord(p).center());
 	this.player.jumped.subscribe(() => { playSound(SOUNDS['jump']); });
 	this.player.fired.subscribe(() => { playSound(SOUNDS['gun']); });
 	tilemap.set(p.x, p.y, 0);
+	this.elevator.init();
 	this.elevator.addTask(this.player);
 	// additional thingamabob.
-	this.statusBox = new TextBox(this.screen.resize(100, 100, -1, +1), FONT);
-	this.score = 0;
+	this.updateStatus();
 	// start music.
-	APP.setMusic(SOUNDS['music']);
+	this.startMusic();
     }
 
     tick(t: number) {
 	super.tick(t);
 	this.elevator.tick(t);
-	this.statusBox.clear();
-	this.statusBox.addSegment(new Vec2(4,16), this.elevator.getFloor());
-	let guest = this.elevator.guest;
-	if (guest !== null) {
-	    this.statusBox.addSegment(new Vec2(4,96), 'GOAL:');
-	    this.statusBox.addSegment(new Vec2(4,106), guest.goal.name);
-	}
-	this.statusBox.addSegment(new Vec2(4,200), 'GUESTS SAVED:');
-	this.statusBox.addSegment(new Vec2(4,216), this.score.toString());
     }
 
     onDirChanged(v: Vec2) {
 	this.player.setMove(v);
-	if (v.y < 0) {
-	    this.player.setJump(+Infinity);
-	    this.player.downjump = false;
-	} else if (0 < v.y) {
-	    this.player.setJump(0);
-	    this.player.downjump = true;
-	} else {
-	    this.player.setJump(0);
-	    this.player.downjump = false;
-	}
     }
 
     onButtonPressed(keysym: KeySym) {
@@ -748,8 +760,23 @@ class Game extends GameScene {
 	ctx.save();
 	ctx.translate(bx+240, by+64);
 	ctx.scale(4, 4);
-	drawArrow(ctx, this.elevator.gravity*4);
+	drawArrow(ctx, -this.elevator.direction*4);
 	ctx.restore();
+    }
+
+    updateStatus() {
+	this.statusBox.clear();
+	let floor = this.elevator.getFloor();
+	this.statusBox.addSegment(new Vec2(4,16), floor.name);
+	if (this.elevator.dooropen) {
+	    this.statusBox.addSegment(new Vec2(4,26), floor.info);
+	}
+	let guest = this.elevator.guest;
+	if (guest !== null) {
+	    this.statusBox.addSegment(new Vec2(4,96), 'GOAL: '+guest.goal.name);
+	}
+	this.statusBox.addSegment(new Vec2(4,200), 'SCORE:');
+	this.statusBox.addSegment(new Vec2(4,210), this.score.toString());
     }
 
     addBalloon(text: string, entity: Entity, voiced=true) {
@@ -757,7 +784,7 @@ class Game extends GameScene {
 	    playSound(SOUNDS['speak']);
 	}
 	let balloon = new Balloon(this.eframe, entity);
-	balloon.addDisplay(text, 8);
+	balloon.addDisplay(text, 12);
 	let task = balloon.addPause(1);
 	task.stopped.subscribe(() => { balloon.stop(); });
 	this.add(balloon);
@@ -773,14 +800,29 @@ class Game extends GameScene {
 	task.lifetime = 3.0;
 	this.add(task);
 	APP.setMusic();
-	let task2 = new SoundTask(SOUNDS['outage']);
-	task2.stopped.subscribe(() => { playSound(SOUNDS['siren']); });
-	this.add(task2);
+	playSound(SOUNDS['outage']);
     }
 
     endOutage() {
 	let task = new SoundTask(SOUNDS['poweron']);
-	task.stopped.subscribe(() => { APP.setMusic(SOUNDS['music']); });
+	task.stopped.subscribe(() => { this.startMusic(); })
 	this.add(task);
+    }
+
+    startMusic() {
+	//APP.setMusic(SOUNDS['music'], 0.025, 36.725);
+    }
+
+    addScore() {
+	this.score++;
+	this.updateStatus();
+    }
+
+    getOutageProb() {
+	return 0.0;
+    }
+    chooseGuest() {
+	// XXX depends on the current score.
+	return choice(GUESTS);
     }
 }
