@@ -15,6 +15,8 @@
 //  Initialize the resources.
 let FONT: Font;
 let FONT_WARN: Font;
+let FONT_TITLE: Font;
+let FONT_ENDING: Font;
 let SPRITES:SpriteSheet;
 let BACKGROUNDS:SpriteSheet;
 let TILES:SpriteSheet;
@@ -24,6 +26,8 @@ let BULLET = new RectImageSource('white', new Rect(-3,-2,6,4));
 addInitHook(() => {
     FONT = new Font(IMAGES['font'], 'white');
     FONT_WARN = new Font(IMAGES['font'], 'red', 4);
+    FONT_TITLE = new Font(IMAGES['font'], 'rgb(0,255,0)', 3);
+    FONT_ENDING = new Font(IMAGES['font'], 'white', 3);
     BACKGROUNDS = new ImageSpriteSheet(
 	IMAGES['backgrounds'], new Vec2(192,192), new Vec2(0,0));
     SPRITES = new ImageSpriteSheet(
@@ -254,7 +258,8 @@ class Coin extends Passenger {
     direction: number;
 
     constructor(elevator: Elevator, direction=0) {
-	let pos = new Vec2(rnd(8, elevator.tilemap.width-8), 0);
+	let x = rnd(elevator.bounds.x+8, elevator.bounds.right()-8);
+	let pos = new Vec2(x, 0);
 	super(elevator, pos);
 	this.sprite.imgsrc = SPRITES.get(S.COIN, (0 < direction)? 0 : 1);
 	this.movement = new Vec2(rnd(2)*2-1, 0).scale(2);
@@ -294,6 +299,7 @@ class Player extends Passenger {
     fired: Signal;
     usermove = new Vec2();
     direction = new Vec2(1,0);
+    invuln = 0;
 
     constructor(elevator: Elevator, pos: Vec2) {
 	super(elevator, pos);
@@ -301,7 +307,10 @@ class Player extends Passenger {
     }
 
     update() {
-	this.moveIfPossible(this.usermove);
+	let v = this.moveIfPossible(this.usermove);
+	if (v.isZero()) {
+	    this.downjump = false;
+	}
 	let i = phase(this.getTime(), 0.5);
 	this.sprite.imgsrc = SPRITES.get(S.PLAYER, i);
 	super.update();
@@ -321,7 +330,7 @@ class Player extends Passenger {
 	    }
 	    this.usermove.y = 0;
 	} else {
-	    this.usermove.y = v.y*2;
+	    this.usermove.y = v.y*4;
 	}
 	
 	this.usermove.x = v.x*4;
@@ -335,6 +344,18 @@ class Player extends Passenger {
 	let bullet = new Bullet(this.elevator, this.pos, this.direction.x);
 	this.elevator.addTask(bullet);
 	this.fired.fire();
+    }
+
+    collidedWith(e: Entity) {
+	if (e instanceof Rat ||
+	    e instanceof Bird) {
+	    let t = this.getTime();
+	    if (this.invuln < t) {
+		playSound(SOUNDS['hurt']);
+		this.downjump = true;
+		this.invuln = t+1;
+	    }
+	}
     }
 }
 
@@ -355,17 +376,22 @@ class Rat extends Passenger {
     update() {
 	let i = phase(this.getTime(), 0.5);
 	this.sprite.imgsrc = SPRITES.get(S.ENEMY_RAT, i);
-	if (rnd(10) == 0) {
+	let v = this.moveIfPossible(this.movement);
+	if (v.isZero() || rnd(10) == 0) {
 	    let vx = rnd(3)-1;
 	    this.movement.x = vx*2;
 	    this.sprite.scale.x = vx;
-	    if (vx == 0) {
-		this.setJump(+Infinity);
+	    if (0 < this.elevator.gravity) {
+		if (vx == 0) {
+		    this.setJump(+Infinity);
+		} else {
+		    this.setJump(0);
+		}
+		this.movement.y = 0;
 	    } else {
-		this.setJump(0);
+		this.movement.y = rnd(3)-1;
 	    }
 	}
-	this.moveIfPossible(this.movement);
 	super.update();
     }
 
@@ -388,12 +414,13 @@ class Bird extends Entity {
     movement: Vec2;
 
     constructor(elevator: Elevator) {
-	let bounds = elevator.bounds.expand(0, -48, 0, +1);
+	let bounds = elevator.bounds.expand(0, -48, 0, 0);
 	let x = (rnd(2) == 0)? (bounds.x+8) : (bounds.right()-8);
-	let pos = new Vec2(x, rnd(8, bounds.bottom()));
+	let pos = new Vec2(x, rnd(0, bounds.bottom()));
 	super(pos);
 	log(bounds);
 	this.elevator = elevator;
+	this.collider = SPRITES.get(0).getBounds();
 	this.bounds = bounds;
 	this.movement = new Vec2();
     }
@@ -405,13 +432,13 @@ class Bird extends Entity {
     update() {
 	let i = phase(this.getTime(), 0.5);
 	this.sprite.imgsrc = SPRITES.get(S.ENEMY_BIRD, i);
-	if (rnd(10) == 0) {
+	let v = this.moveIfPossible(this.movement);
+	if (v.isZero() || rnd(10) == 0) {
 	    let vx = rnd(2)*2-1;
 	    this.movement.x = vx*2;
 	    this.movement.y = rnd(3)-1;
 	    this.sprite.scale.x = vx;
 	}
-	this.moveIfPossible(this.movement);
 	super.update();
     }
 
@@ -544,6 +571,8 @@ class Elevator extends Layer {
     nextevent = 0;
     direction = 0;
     gravity = 1;
+    correct = true;
+    titlepos = 240;
     
     private _curdoor = 1;
     
@@ -561,6 +590,10 @@ class Elevator extends Layer {
     
     vote(direction: number) {
 	this.direction = direction;
+	this.correct = true;
+	if (this.guest !== null) {
+	    this.correct = 0 < (direction * (this.guest.goal.y - this.getFloor().y));
+	}
 	// close door.
 	this.dooropen = false;
 	this.nextevent = 0;
@@ -605,6 +638,15 @@ class Elevator extends Layer {
 	// update the screenshake.
 	this.basepos += this.shake;
 	this.shake = (this.shake - this.basepos*0.4)*0.8;
+	
+	if (10 <= this.game.score) {
+	    this.titlepos -= 8;
+	} else {
+	    this.titlepos = (this.titlepos*0.8);
+	    if (this.titlepos < 2) {
+		this.titlepos = 0;
+	    }
+	}
     }
 
     openDoor() {
@@ -695,7 +737,7 @@ class Elevator extends Layer {
     }
     
     render(ctx: CanvasRenderingContext2D, bx: number, by: number) {
-	by += this.basepos;
+	by += this.basepos + this.titlepos;
 	let rect = this.bounds;
 	// frame.
 	ctx.strokeStyle = 'gray';
@@ -751,6 +793,7 @@ class Game extends GameScene {
     player: Player;
     statusBox: TextBox;
     score: number;
+    titleBox: TextBox;
     
     init() {
 	super.init();
@@ -776,6 +819,15 @@ class Game extends GameScene {
 	this.eframe.x += 16;
 	this.elevator = new Elevator(this, tilemap);
 	this.statusBox = new TextBox(this.screen.resize(100, 100, -1, +1), FONT);
+	this.titleBox = new TextBox(this.eframe, FONT_TITLE);
+	this.titleBox.lineSpace = 16;
+	this.titleBox.putText(['ELEVATOR', 'SAMBA'], 'center', 'center');
+	this.titleBox.zOrder = 2;
+	this.titleBox.visible = true;
+	this.layer.addSprite(this.titleBox);
+	let task = new DelayTask(3);
+	task.stopped.subscribe(() => { this.titleBox.visible = false; });
+	this.add(task);
 	// place a player.
 	let p = tilemap.findTile((c:number) => { return (c == T.PLAYER); });
 	this.player = new Player(this.elevator, tilemap.map2coord(p).center());
@@ -818,6 +870,16 @@ class Game extends GameScene {
 	ctx.scale(4, 4);
 	drawArrow(ctx, -this.elevator.direction*4);
 	ctx.restore();
+	if (!this.elevator.correct) {
+	    ctx.strokeStyle = 'red';
+	    ctx.lineWidth = 4;
+	    ctx.beginPath();
+	    ctx.moveTo(bx+230, bx+54);
+	    ctx.lineTo(bx+250, bx+74);
+	    ctx.moveTo(bx+250, bx+54);
+	    ctx.lineTo(bx+230, bx+74);
+	    ctx.stroke();
+	}
     }
 
     updateStatus() {
@@ -866,30 +928,50 @@ class Game extends GameScene {
     }
 
     startMusic() {
-	//APP.setMusic(SOUNDS['music'], 0.025, 36.725);
+	APP.setMusic(SOUNDS['music'], 0.025, 36.725);
     }
 
     addScore() {
 	this.score++;
 	this.updateStatus();
+	if (10 <= this.score) {
+	    let endingBox = new TextBox(this.eframe, FONT_ENDING);
+	    endingBox.lineSpace = 16;
+	    endingBox.putText(['THANKS FOR', 'PLAYING!!1'], 'center', 'center');
+	    endingBox.zOrder = -1;
+	    endingBox.visible = false;
+	    this.layer.addSprite(endingBox);
+	}
     }
 
     // game difficulty parameters.
 
     chooseGuest() {
-	// XXX depends on the current score.
-	return choice(GUESTS);
+	if (this.score < 5) {
+	    return choice([GUESTS[0], GUESTS[2], GUESTS[3]]);
+	} else if (this.score < 10) {
+	    return choice([GUESTS[0], GUESTS[1], GUESTS[2], GUESTS[3]]);
+	} else {
+	    return GUESTS[4];
+	}
     }
     getOutageProb() {
-	// XXX depends on the current score.
-	return 0.0;
+	return lowerbound(0, (this.score-5)*0.1);
     }
     getNumCoins() {
-	// XXX depends on the current score.
-	return 1;
+	if (this.score < 7) {
+	    return 1;
+	} else {
+	    return 2;
+	}
     }
     getNumEnemies() {
-	// XXX depends on the current score.
-	return 1;
+	if (this.score < 3) {
+	    return 1;
+	} else if (this.score < 7) {
+	    return 2;
+	} else {
+	    return 3;
+	}
     }
 }
