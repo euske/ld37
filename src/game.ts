@@ -44,7 +44,8 @@ enum S {
     PUFF = 6,
     SHADOW = 6,
     COIN = 7,
-    ENEMY = 8,
+    ENEMY_RAT = 8,
+    ENEMY_BIRD = 9,
 };
 
 enum T {
@@ -223,14 +224,14 @@ class Passenger extends PhysicalEntity {
 	return [this.elevator.bounds];
     }
 
-    getObstaclesFor(range: Rect, v: Vec2, context: string): Rect[] {
+    getObstaclesFor(range: Rect, v: Vec2, context: string): Collider[] {
 	let ts = this.tilemap.tilesize;
-	let rects = [] as Rect[];
+	let rects = [] as Collider[];
 	this.tilemap.apply((x:number, y:number, c:number) => {
 	    switch (c) {
 	    case T.FLOOR:
 		if (!this.downjump || v.y < 0) {
-		    rects.push(new Rect(x*ts, y*ts, ts, 8));
+		    rects.push(new AALine(x*ts, y*ts, x*ts+ts, y*ts));
 		}
 		break;
 	    case T.BLOCK:
@@ -252,7 +253,8 @@ class Coin extends Passenger {
     movement: Vec2;
     direction: number;
 
-    constructor(elevator: Elevator, pos: Vec2, direction=0) {
+    constructor(elevator: Elevator, direction=0) {
+	let pos = new Vec2(rnd(8, elevator.tilemap.width-8), 0);
 	super(elevator, pos);
 	this.sprite.imgsrc = SPRITES.get(S.COIN, (0 < direction)? 0 : 1);
 	this.movement = new Vec2(rnd(2)*2-1, 0).scale(2);
@@ -275,7 +277,8 @@ class Coin extends Passenger {
 
     collidedWith(e: Entity) {
 	if (e instanceof Player ||
-	    e instanceof Enemy) {
+	    e instanceof Rat ||
+	    e instanceof Bird) {
 	    playSound(SOUNDS['coin']);
 	    this.stop();
 	    this.elevator.vote(this.direction);
@@ -336,26 +339,77 @@ class Player extends Passenger {
 }
 
 
-//  Enemy
+//  Rat
 //
-class Enemy extends Passenger {
+class Rat extends Passenger {
 
-    movement = new Vec2();
+    movement: Vec2;
 
-    constructor(elevator: Elevator, pos: Vec2) {
+    constructor(elevator: Elevator) {
+	let x = (rnd(2) == 0)? (elevator.bounds.x+8) : (elevator.bounds.right()-8);
+	let pos = new Vec2(x, elevator.bounds.bottom()-24);
 	super(elevator, pos);
+	this.movement = new Vec2();
     }
 
     update() {
 	let i = phase(this.getTime(), 0.5);
-	this.sprite.imgsrc = SPRITES.get(S.ENEMY, i);
+	this.sprite.imgsrc = SPRITES.get(S.ENEMY_RAT, i);
 	if (rnd(10) == 0) {
 	    let vx = rnd(3)-1;
 	    this.movement.x = vx*2;
 	    this.sprite.scale.x = vx;
 	    if (vx == 0) {
+		this.setJump(+Infinity);
+	    } else {
 		this.setJump(0);
 	    }
+	}
+	this.moveIfPossible(this.movement);
+	super.update();
+    }
+
+    collidedWith(e: Entity) {
+	if (e instanceof Bullet) {
+	    e.stop();
+	    this.stop();
+	    this.elevator.addPuff(this.pos);
+	}
+    }
+}
+
+
+//  Bird
+//
+class Bird extends Entity {
+
+    elevator: Elevator;
+    bounds: Rect;
+    movement: Vec2;
+
+    constructor(elevator: Elevator) {
+	let bounds = elevator.bounds.expand(0, -48, 0, +1);
+	let x = (rnd(2) == 0)? (bounds.x+8) : (bounds.right()-8);
+	let pos = new Vec2(x, rnd(8, bounds.bottom()));
+	super(pos);
+	log(bounds);
+	this.elevator = elevator;
+	this.bounds = bounds;
+	this.movement = new Vec2();
+    }
+
+    getFencesFor(range: Rect, v: Vec2, context: string): Rect[] {
+	return [this.bounds];
+    }
+
+    update() {
+	let i = phase(this.getTime(), 0.5);
+	this.sprite.imgsrc = SPRITES.get(S.ENEMY_BIRD, i);
+	if (rnd(10) == 0) {
+	    let vx = rnd(2)*2-1;
+	    this.movement.x = vx*2;
+	    this.movement.y = rnd(3)-1;
+	    this.sprite.scale.x = vx;
 	}
 	this.moveIfPossible(this.movement);
 	super.update();
@@ -375,14 +429,18 @@ class Enemy extends Passenger {
 //
 class Guest extends Passenger {
 
-    movement = new Vec2();
+    movement: Vec2;
     info: GuestInfo;
     goal: FloorInfo;
-    exiting = false;
+    exiting: boolean;
 
-    constructor(elevator: Elevator, pos: Vec2, info: GuestInfo) {
+    constructor(elevator: Elevator, info: GuestInfo) {
+	let x = (rnd(2) == 0)? (elevator.bounds.x+8) : (elevator.bounds.right()-8);
+	let pos = new Vec2(x, elevator.bounds.bottom()-24);
 	super(elevator, pos);
 	this.info = info;
+	this.movement = new Vec2();
+	this.exiting = false;
 	let floor = elevator.getFloor();
 	while (true) {
 	    this.goal = choice(info.floors);
@@ -572,17 +630,16 @@ class Elevator extends Layer {
 	this.shake = -this.gravity*2;
 	this.gravity = 1;
 	this.nextevent = Infinity;
-	// add enemies.
-	let p = new Vec2(rnd(this.tilemap.width), 0);
-	let enemy = new Enemy(this, this.tilemap.map2coord(p).center());
-	this.addTask(enemy);
 	// add coins.
-	p = new Vec2(rnd(this.tilemap.width), 0);
-	let coin1 = new Coin(this, this.tilemap.map2coord(p).center(), -1);
-	this.addTask(coin1);
-	p = new Vec2(rnd(this.tilemap.width), 0);
-	let coin2 = new Coin(this, this.tilemap.map2coord(p).center(), +1);
-	this.addTask(coin2);
+	for (let i = 0; i < this.game.getNumCoins(); i++) {
+	    this.addTask(new Coin(this, -1));
+	    this.addTask(new Coin(this, +1));
+	}
+	// spawn enemies.
+	for (let i = 0; i < this.game.getNumEnemies(); i++) {
+	    let enemy = (rnd(2) == 0)? new Bird(this) : new Rat(this);
+	    this.addTask(enemy);
+	}
 	// remove the guest.
 	if (this.guest === null) {
 	    this.spawnGuest();
@@ -623,8 +680,7 @@ class Elevator extends Layer {
 
     spawnGuest() {
 	let info = this.game.chooseGuest();
-	let x = (rnd(2) == 0)? (this.bounds.x+8) : (this.bounds.right()-8);
-	this.guest = new Guest(this, new Vec2(x, this.bounds.bottom()-24), info);
+	this.guest = new Guest(this, info);
 	this.addTask(this.guest);
 	this.game.updateStatus();
 	this.game.addBalloon(this.guest.getLine0(), this.guest);
@@ -818,11 +874,22 @@ class Game extends GameScene {
 	this.updateStatus();
     }
 
-    getOutageProb() {
-	return 0.0;
-    }
+    // game difficulty parameters.
+
     chooseGuest() {
 	// XXX depends on the current score.
 	return choice(GUESTS);
+    }
+    getOutageProb() {
+	// XXX depends on the current score.
+	return 0.0;
+    }
+    getNumCoins() {
+	// XXX depends on the current score.
+	return 1;
+    }
+    getNumEnemies() {
+	// XXX depends on the current score.
+	return 1;
     }
 }
